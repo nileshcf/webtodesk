@@ -1,0 +1,62 @@
+############################
+# Maven / Build
+############################
+target/
+**/target/
+
+############################
+# Logs
+############################
+*.log
+
+############################
+# OS files
+############################
+.DS_Store
+Thumbs.db
+
+############################
+# IntelliJ IDEA
+############################
+.idea/
+*.iml
+*.iws
+*.ipr
+
+############################
+# Eclipse / STS
+############################
+.classpath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+.apt_generated
+.factorypath
+
+############################
+# VS Code
+############################
+.vscode/
+
+############################
+# NetBeans
+############################
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+############################
+# Node.js / Frontend
+############################
+node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+############################
+# Docker
+############################
+**/*.log

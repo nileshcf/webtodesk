@@ -1,0 +1,41 @@
+server:
+  port: 8080
+
+jwt:
+  access-secret: 7c41b134c9f40a58708c0d7b67ccea40
+  refresh-secret: 3b842a72031ec37f34b3a563014bde8c
+  access-token-expiry: 900000
+  refresh-token-expiry: 2592000000
+  prefix: "Bearer "
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+      routes:
+        - id: user-service-route
+          uri: lb://user-service
+          predicates:
+            - Path=/user/**
+          filters:
+            - StripPrefix=1
+        - id: conversion-service-route
+          uri: lb://conversion-service
+          predicates:
+            - Path=/conversion/**
+          filters:
+            - StripPrefix=1
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+
+logging:
+  level:
+    org.springframework.security: DEBUG
+    org.springframework.cloud.gateway: DEBUG

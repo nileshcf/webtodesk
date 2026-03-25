@@ -1,0 +1,15 @@
+server:
+  port: 8761
+
+spring:
+  application:
+    name: discovery-service
+
+eureka:
+  client:
+    # Since this IS the server, it shouldn't register with itself
+    register-with-eureka: false
+    fetch-registry: false
+  server:
+    # Wait time before removing unresponsive services (Speed up dev environment)
+    wait-time-in-ms-when-sync-empty: 5

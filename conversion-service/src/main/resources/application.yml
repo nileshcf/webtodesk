@@ -1,0 +1,14 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: conversion-service
+  data:
+    mongodb:
+      uri: mongodb+srv://hotstar_dev:hotstar_dev@123@cluster0.owucl7h.mongodb.net/webtodesk_conversions?appName=cluster0
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/

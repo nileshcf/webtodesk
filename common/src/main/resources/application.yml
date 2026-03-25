@@ -1,0 +1,6 @@
+jwt:
+  access-secret: 7c41b134c9f40a58708c0d7b67ccea40
+  refresh-secret: 3b842a72031ec37f34b3a563014bde8c
+  access-token-expiry: 900000      # 15 minutes in ms
+  refresh-token-expiry: 2592000000 # 30 days in ms
+  prefix: "Bearer "
