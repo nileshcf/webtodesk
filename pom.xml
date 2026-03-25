@@ -15,6 +15,7 @@
         <module>api-gateway</module>
         <module>discovery-service</module>
         <module>conversion-service</module>
+        <module>billing-service</module>
     </modules>
 
     <properties>
