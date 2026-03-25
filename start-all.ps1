@@ -1,17 +1,17 @@
-# ──────────────────────────────────────────────────────
-# WebToDesk — Start All Services (Local Development)
+# ------------------------------------------------------
+# WebToDesk - Start All Services (Local Development)
 # Run: .\start-all.ps1
-# ──────────────────────────────────────────────────────
+# ------------------------------------------------------
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  WebToDesk — Starting All Services"     -ForegroundColor Cyan
+Write-Host "  WebToDesk - Starting All Services"     -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $root = $PSScriptRoot
 
-# 1. Discovery Service (Eureka — must start first)
+# 1. Discovery Service (Eureka - must start first)
 Write-Host "[1/5] Starting Discovery Service (port 8761)..." -ForegroundColor Yellow
 Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\discovery-service && mvnw.cmd spring-boot:run" -WindowStyle Normal
 Start-Sleep -Seconds 15  # Wait for Eureka to be ready
