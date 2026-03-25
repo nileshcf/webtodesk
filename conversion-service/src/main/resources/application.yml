@@ -6,7 +6,7 @@ spring:
     name: conversion-service
   data:
     mongodb:
-      uri: mongodb+srv://hotstar_dev:hotstar_dev@123@cluster0.owucl7h.mongodb.net/webtodesk_conversions?appName=cluster0
+      uri: mongodb+srv://dbuser:dbuser%40123@cluster.fwne9bx.mongodb.net/webtodesk_conversions?appName=cluster
 
 eureka:
   client:
