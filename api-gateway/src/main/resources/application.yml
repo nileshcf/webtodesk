@@ -16,16 +16,16 @@ spring:
     gateway:
       discovery:
         locator:
-          enabled: true
+          enabled: false
       routes:
         - id: user-service-route
-          uri: lb://user-service
+          uri: http://127.0.0.1:8081
           predicates:
             - Path=/user/**
           filters:
             - StripPrefix=1
         - id: conversion-service-route
-          uri: lb://conversion-service
+          uri: http://127.0.0.1:8082
           predicates:
             - Path=/conversion/**
           filters:

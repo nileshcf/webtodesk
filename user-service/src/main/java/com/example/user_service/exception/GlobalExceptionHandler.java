@@ -1,14 +1,18 @@
 package com.example.user_service.exception;
 
 import com.example.common.dto.ErrorResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -24,8 +28,8 @@ public class GlobalExceptionHandler {
 	// ─────────────────────────────────────────
 
 	@ExceptionHandler(BadCredentialsException.class)
-	public ResponseEntity<ErrorResponse> handleBadCredentials(BadCredentialsException e) {
-		log.warn("Bad credentials attempt");
+	public ResponseEntity<ErrorResponse> handleBadCredentials(BadCredentialsException e, HttpServletRequest request) {
+		log.warn("Bad credentials attempt on {} {}", request.getMethod(), request.getRequestURI());
 		return ResponseEntity
 				.status(HttpStatus.UNAUTHORIZED)
 				.body(new ErrorResponse(
@@ -36,8 +40,8 @@ public class GlobalExceptionHandler {
 	}
 
 	@ExceptionHandler(UsernameNotFoundException.class)
-	public ResponseEntity<ErrorResponse> handleUserNotFound(UsernameNotFoundException e) {
-		log.warn("User not found: {}", e.getMessage());
+	public ResponseEntity<ErrorResponse> handleUserNotFound(UsernameNotFoundException e, HttpServletRequest request) {
+		log.warn("User not found on {} {}: {}", request.getMethod(), request.getRequestURI(), e.getMessage());
 		return ResponseEntity
 				.status(HttpStatus.NOT_FOUND)
 				.body(new ErrorResponse(
@@ -48,8 +52,8 @@ public class GlobalExceptionHandler {
 	}
 
 	@ExceptionHandler(DisabledException.class)
-	public ResponseEntity<ErrorResponse> handleDisabled(DisabledException e) {
-		log.warn("Disabled account login attempt");
+	public ResponseEntity<ErrorResponse> handleDisabled(DisabledException e, HttpServletRequest request) {
+		log.warn("Disabled account login attempt on {} {}", request.getMethod(), request.getRequestURI());
 		return ResponseEntity
 				.status(HttpStatus.FORBIDDEN)
 				.body(new ErrorResponse(
@@ -59,19 +63,31 @@ public class GlobalExceptionHandler {
 				));
 	}
 
+	@ExceptionHandler({AuthenticationCredentialsNotFoundException.class, MissingRequestHeaderException.class})
+	public ResponseEntity<ErrorResponse> handleAuthHeader(Exception e, HttpServletRequest request) {
+		log.warn("Missing authentication context on {} {}: {}", request.getMethod(), request.getRequestURI(), e.getMessage());
+		return ResponseEntity
+				.status(HttpStatus.UNAUTHORIZED)
+				.body(new ErrorResponse(
+						"UNAUTHORIZED",
+						"Authentication context is missing or invalid",
+						HttpStatus.UNAUTHORIZED.value()
+				));
+	}
+
 	// ─────────────────────────────────────────
 	// Validation Exceptions
 	// ─────────────────────────────────────────
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)
-	public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException e) {
+	public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException e, HttpServletRequest request) {
 		String message = e.getBindingResult()
 				.getFieldErrors()
 				.stream()
 				.map(FieldError::getDefaultMessage)
 				.collect(Collectors.joining(", "));
 
-		log.warn("Validation failed: {}", message);
+		log.warn("Validation failed on {} {}: {}", request.getMethod(), request.getRequestURI(), message);
 		return ResponseEntity
 				.status(HttpStatus.BAD_REQUEST)
 				.body(new ErrorResponse(
@@ -86,14 +102,38 @@ public class GlobalExceptionHandler {
 	// ─────────────────────────────────────────
 
 	@ExceptionHandler(RuntimeException.class)
-	public ResponseEntity<ErrorResponse> handleRuntime(RuntimeException e) {
-		log.error("Runtime exception: {}", e.getMessage());
+	public ResponseEntity<ErrorResponse> handleRuntime(RuntimeException e, HttpServletRequest request) {
+		log.error("Runtime exception on {} {}: {}", request.getMethod(), request.getRequestURI(), e.getMessage(), e);
+		String msg = e.getMessage() == null ? "Request failed" : e.getMessage();
+		HttpStatus status = HttpStatus.BAD_REQUEST;
+		String code = "BAD_REQUEST";
+
+		if (msg.toLowerCase().contains("not found")) {
+			status = HttpStatus.NOT_FOUND;
+			code = "NOT_FOUND";
+		} else if (msg.toLowerCase().contains("already taken")) {
+			status = HttpStatus.CONFLICT;
+			code = "CONFLICT";
+		}
+
 		return ResponseEntity
-				.status(HttpStatus.BAD_REQUEST)
+				.status(status)
 				.body(new ErrorResponse(
-						"BAD_REQUEST",
-						e.getMessage(),
-						HttpStatus.BAD_REQUEST.value()
+						code,
+						msg,
+						status.value()
+				));
+	}
+
+	@ExceptionHandler(DataAccessException.class)
+	public ResponseEntity<ErrorResponse> handleDataAccess(DataAccessException e, HttpServletRequest request) {
+		log.error("Data access failure on {} {}: {}", request.getMethod(), request.getRequestURI(), e.getMessage(), e);
+		return ResponseEntity
+				.status(HttpStatus.SERVICE_UNAVAILABLE)
+				.body(new ErrorResponse(
+						"DATA_STORE_UNAVAILABLE",
+						"Database or cache is temporarily unavailable",
+						HttpStatus.SERVICE_UNAVAILABLE.value()
 				));
 	}
 
@@ -102,8 +142,8 @@ public class GlobalExceptionHandler {
 	// ─────────────────────────────────────────
 
 	@ExceptionHandler(Exception.class)
-	public ResponseEntity<ErrorResponse> handleGeneral(Exception e) {
-		log.error("Unexpected error: {}", e.getMessage());
+	public ResponseEntity<ErrorResponse> handleGeneral(Exception e, HttpServletRequest request) {
+		log.error("Unexpected error on {} {}: {}", request.getMethod(), request.getRequestURI(), e.getMessage(), e);
 		return ResponseEntity
 				.status(HttpStatus.INTERNAL_SERVER_ERROR)
 				.body(new ErrorResponse(
