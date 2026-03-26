@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import { authApi, getAccessToken } from '../services/api';
-import type { User } from '../types';
+import type { UpdateProfileRequest, User } from '../types';
 
 interface AuthContextType {
   user: User | null;
@@ -8,6 +8,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (username: string, email: string, password: string, phoneNumber: number) => Promise<void>;
+  updateProfile: (data: UpdateProfileRequest) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -40,13 +41,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await authApi.register({ username, email, password, phoneNumber });
   };
 
+  const updateProfile = async (data: UpdateProfileRequest) => {
+    await authApi.updateProfile(data);
+    const profile = await authApi.getProfile();
+    setUser(profile);
+  };
+
   const logout = async () => {
     await authApi.logout();
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, register, updateProfile, logout }}>
       {children}
     </AuthContext.Provider>
   );

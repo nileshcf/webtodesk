@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Globe, Monitor, Trash2, Download, Loader2,
-  ExternalLink, ChevronDown, X, AlertCircle, CheckCircle2
+  ExternalLink, X, AlertCircle, CheckCircle2, Sparkles, Rocket, Shield
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { conversionApi } from '../services/api';
@@ -109,6 +109,58 @@ export default function DashboardPage() {
           </button>
         </motion.div>
 
+        {/* Quick Actions / Overview (aesthetic, removable later if desired) */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8"
+        >
+          {[
+            {
+              title: 'Convert a URL',
+              subtitle: 'Paste a site, get an app config.',
+              icon: Rocket,
+              accent: 'from-accent-blue/25 to-transparent',
+              onClick: () => setShowForm(true),
+            },
+            {
+              title: 'Security presets',
+              subtitle: 'Screenshot protection ready.',
+              icon: Shield,
+              accent: 'from-accent-violet/20 to-transparent',
+              onClick: () => {},
+            },
+            {
+              title: 'What’s new',
+              subtitle: 'Refined glass + profile settings.',
+              icon: Sparkles,
+              accent: 'from-white/10 to-transparent',
+              onClick: () => {},
+            },
+          ].map(({ title, subtitle, icon: Icon, accent, onClick }) => (
+            <motion.button
+              key={title}
+              type="button"
+              whileHover={{ y: -2 }}
+              whileTap={{ scale: 0.99 }}
+              onClick={onClick}
+              className="glass-card p-5 sm:p-6 text-left relative overflow-hidden group"
+            >
+              <div className={`absolute inset-0 bg-gradient-to-br ${accent} opacity-0 group-hover:opacity-100 transition-opacity`} />
+              <div className="relative flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <h3 className="text-base font-semibold tracking-tight mb-1">{title}</h3>
+                  <p className="text-sm text-white/40 leading-relaxed">{subtitle}</p>
+                </div>
+                <div className="w-10 h-10 rounded-2xl bg-white/[0.04] border border-white/5 flex items-center justify-center flex-shrink-0">
+                  <Icon size={18} className="text-white/60" />
+                </div>
+              </div>
+            </motion.button>
+          ))}
+        </motion.div>
+
         {/* Create Form */}
         <AnimatePresence>
           {showForm && (
@@ -188,8 +240,14 @@ export default function DashboardPage() {
 
         {/* Projects List */}
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 size={24} className="animate-spin text-white/30" />
+          <div className="grid gap-4">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="glass-card p-5 sm:p-6">
+                <div className="h-5 w-48 bg-white/5 rounded-lg animate-pulse mb-3" />
+                <div className="h-4 w-72 bg-white/5 rounded-lg animate-pulse mb-2" />
+                <div className="h-3 w-40 bg-white/5 rounded-lg animate-pulse" />
+              </div>
+            ))}
           </div>
         ) : projects.length === 0 ? (
           <motion.div
