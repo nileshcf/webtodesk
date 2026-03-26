@@ -42,7 +42,7 @@ echo "Starting services..."
 
 # Start discovery first
 start_jar "/app/discovery/*.jar" "8761" "discovery" "-Xms64m -Xmx160m"
-sleep 3
+sleep 30
 
 # Start user + conversion
 start_jar "/app/user/*.jar" "8081" "user" "-Xms96m -Xmx220m"
