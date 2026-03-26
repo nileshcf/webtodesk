@@ -1,0 +1,26 @@
+FROM eclipse-temurin:17-jre-alpine
+
+RUN apk add --no-cache nginx bash
+
+WORKDIR /app
+
+# Nginx serves the frontend and proxies API calls back to the API gateway
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Starts discovery -> user -> conversion -> gateway, then keeps Nginx in the foreground.
+COPY deploy/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Backend jars (built by CI before docker build)
+COPY discovery-service/target/*.jar /app/discovery/
+COPY user-service/target/*.jar /app/user/
+COPY conversion-service/target/*.jar /app/conversion/
+COPY api-gateway/target/*.jar /app/gateway/
+
+# Frontend (built by CI before docker build)
+COPY frontend/dist/ /usr/share/nginx/html/
+
+EXPOSE 80
+
+ENTRYPOINT ["/entrypoint.sh"]
+

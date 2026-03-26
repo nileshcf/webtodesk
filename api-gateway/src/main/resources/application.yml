@@ -2,8 +2,9 @@ server:
   port: 8080
 
 jwt:
-  access-secret: 7c41b134c9f40a58708c0d7b67ccea40
-  refresh-secret: 3b842a72031ec37f34b3a563014bde8c
+  # Provided at runtime (GitHub Actions/Fly secrets)
+  access-secret: ${JWT_ACCESS_SECRET}
+  refresh-secret: ${JWT_REFRESH_SECRET}
   access-token-expiry: 900000
   refresh-token-expiry: 2592000000
   prefix: "Bearer "
