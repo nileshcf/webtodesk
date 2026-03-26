@@ -1,8 +1,11 @@
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Sparkles } from 'lucide-react';
+import { useAuth } from '../../hooks/useAuth';
 
 export default function Hero() {
+  const { isAuthenticated, isLoading } = useAuth();
+
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-20">
       {/* Background glow */}
@@ -53,13 +56,44 @@ export default function Hero() {
           transition={{ duration: 0.6, delay: 0.55 }}
           className="flex flex-col sm:flex-row items-center justify-center gap-4"
         >
-          <Link to="/register" className="btn-primary flex items-center gap-2 group">
-            Start Converting
-            <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
-          </Link>
-          <Link to="/login" className="btn-ghost">
-            Sign In
-          </Link>
+          {isLoading ? (
+            <>
+              <button
+                type="button"
+                disabled
+                className="btn-primary flex items-center gap-2 opacity-100"
+              >
+                Preparing...
+              </button>
+              <button
+                type="button"
+                disabled
+                className="btn-ghost opacity-100"
+              >
+                Please wait
+              </button>
+            </>
+          ) : isAuthenticated ? (
+            <>
+              <Link to="/dashboard" className="btn-primary flex items-center gap-2 group">
+                Open Dashboard
+                <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
+              </Link>
+              <Link to="/settings" className="btn-ghost">
+                Profile & Settings
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link to="/register" className="btn-primary flex items-center gap-2 group">
+                Start Converting
+                <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
+              </Link>
+              <Link to="/login" className="btn-ghost">
+                Sign In
+              </Link>
+            </>
+          )}
         </motion.div>
 
         {/* Floating mockup hint */}

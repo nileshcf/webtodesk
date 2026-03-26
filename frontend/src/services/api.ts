@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type {
   LoginRequest, SignupRequest, AuthTokens, ConversionProject,
-  CreateConversionRequest, ElectronConfig
+  CreateConversionRequest, ElectronConfig, User, UserProfileDetails, UpdateProfileRequest
 } from '../types';
 
 const api = axios.create({
@@ -91,9 +91,24 @@ export const authApi = {
     clearTokens();
   },
 
-  async getProfile() {
-    const res = await api.get('/user/me');
+  async getProfileDetails(): Promise<UserProfileDetails> {
+    const res = await api.get<UserProfileDetails>('/user/me');
     return res.data;
+  },
+
+  async updateProfile(data: UpdateProfileRequest): Promise<UserProfileDetails> {
+    const res = await api.put<UserProfileDetails>('/user/me', data);
+    return res.data;
+  },
+
+  async getProfile() {
+    const profile = await authApi.getProfileDetails();
+    return {
+      id: profile.userId,
+      email: profile.email,
+      username: profile.username,
+      roles: profile.roles,
+    } satisfies User;
   },
 
   initFromStorage() {
