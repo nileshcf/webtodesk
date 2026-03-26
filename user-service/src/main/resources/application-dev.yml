@@ -1,7 +1,7 @@
 spring:
   datasource:
-    url: jdbc:postgresql://ep-wispy-grass-ahm5qrep-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require
-    username: neondb_owner
+    url: ${USER_SERVICE_DB_URL}
+    username: ${USER_SERVICE_DB_USERNAME}
     password: ${USER_SERVICE_DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
