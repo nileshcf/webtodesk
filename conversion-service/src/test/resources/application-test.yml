@@ -1,0 +1,8 @@
+spring:
+  data:
+    mongodb:
+      uri: mongodb://localhost:${embedded.mongo.port:27017}/test_webtodesk
+
+eureka:
+  client:
+    enabled: false

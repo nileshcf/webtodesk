@@ -3,6 +3,7 @@ package com.example.conversion_service.service;
 import com.example.conversion_service.dto.*;
 import com.example.conversion_service.entity.ConversionProject;
 import com.example.conversion_service.entity.ConversionProject.ConversionStatus;
+import com.example.conversion_service.exception.ProjectNotFoundException;
 import com.example.conversion_service.repository.ConversionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -61,7 +62,7 @@ public class ConversionService {
 
     public void delete(String id) {
         if (!repository.existsById(id)) {
-            throw new RuntimeException("Conversion project not found: " + id);
+            throw new ProjectNotFoundException(id);
         }
         repository.deleteById(id);
         log.info("Deleted conversion project: {}", id);
@@ -97,7 +98,7 @@ public class ConversionService {
 
     private ConversionProject findOrThrow(String id) {
         return repository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Conversion project not found: " + id));
+                .orElseThrow(() -> new ProjectNotFoundException(id));
     }
 
     private String sanitizeProjectName(String name) {
