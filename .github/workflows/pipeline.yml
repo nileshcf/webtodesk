@@ -60,6 +60,51 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
+      - name: Sync Render environment variables
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          JWT_ACCESS_SECRET: ${{ secrets.JWT_ACCESS_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+          USER_SERVICE_DB_URL: ${{ secrets.USER_SERVICE_DB_URL }}
+          USER_SERVICE_DB_USERNAME: ${{ secrets.USER_SERVICE_DB_USERNAME }}
+          USER_SERVICE_DB_PASSWORD: ${{ secrets.USER_SERVICE_DB_PASSWORD }}
+          USER_SERVICE_REDIS_URL: ${{ secrets.USER_SERVICE_REDIS_URL }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "Missing RENDER_API_KEY"
+            exit 1
+          fi
+          if [ -z "$RENDER_SERVICE_ID" ]; then
+            echo "Missing RENDER_SERVICE_ID"
+            exit 1
+          fi
+
+          update_env_var () {
+            key="$1"
+            value="$2"
+            if [ -z "$value" ]; then
+              echo "Missing $key"
+              exit 1
+            fi
+
+            curl -sS -X PUT "https://api.render.com/v1/services/$RENDER_SERVICE_ID/env-vars/$key" \
+              -H "Authorization: Bearer $RENDER_API_KEY" \
+              -H "Content-Type: application/json" \
+              --data "{\"value\":\"$value\"}" >/dev/null
+          }
+
+          echo "Updating Render env vars..."
+          update_env_var "JWT_ACCESS_SECRET" "$JWT_ACCESS_SECRET"
+          update_env_var "JWT_REFRESH_SECRET" "$JWT_REFRESH_SECRET"
+          update_env_var "USER_SERVICE_DB_URL" "$USER_SERVICE_DB_URL"
+          update_env_var "USER_SERVICE_DB_USERNAME" "$USER_SERVICE_DB_USERNAME"
+          update_env_var "USER_SERVICE_DB_PASSWORD" "$USER_SERVICE_DB_PASSWORD"
+          update_env_var "USER_SERVICE_REDIS_URL" "$USER_SERVICE_REDIS_URL"
+          update_env_var "MONGODB_URI" "$MONGODB_URI"
+          echo "Render env vars updated"
+
       - name: Trigger Render deploy
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
