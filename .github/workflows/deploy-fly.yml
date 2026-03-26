@@ -84,10 +84,10 @@ jobs:
       - name: Deploy image to Fly.io
         env:
           FLY_APP_NAME: ${{ secrets.FLY_APP_NAME }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           JWT_ACCESS_SECRET: ${{ secrets.JWT_ACCESS_SECRET }}
           JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
-          USER_SERVICE_DB_PASSWORD: ${{ secrets.USER_SERVICE_DB_PASSWORD }}
           USER_SERVICE_REDIS_URL: ${{ secrets.USER_SERVICE_REDIS_URL }}
         run: |
           if [ -z "$FLY_APP_NAME" ]; then
@@ -95,14 +95,11 @@ jobs:
             exit 1
           fi
 
-          flyctl auth token "${{ secrets.FLY_API_TOKEN }}"
-
           # Set runtime secrets (NOT stored in the repo, and not hardcoded in workflow).
           flyctl secrets set --app "$FLY_APP_NAME" \
             JWT_ACCESS_SECRET="$JWT_ACCESS_SECRET" \
             JWT_REFRESH_SECRET="$JWT_REFRESH_SECRET" \
             MONGODB_URI="$MONGODB_URI" \
-            USER_SERVICE_DB_PASSWORD="$USER_SERVICE_DB_PASSWORD" \
             USER_SERVICE_REDIS_URL="$USER_SERVICE_REDIS_URL"
 
           IMAGE="${{ env.REGISTRY_IMAGE }}:${{ env.IMAGE_TAG }}"

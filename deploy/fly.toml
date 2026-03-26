@@ -1,4 +1,3 @@
-app = "webtodesk"
 primary_region = "iad"
 
 [http_service]
