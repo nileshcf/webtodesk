@@ -1,5 +1,5 @@
 server {
-  listen 80;
+  listen ${PORT};
   server_name _;
 
   root /usr/share/nginx/html;
@@ -35,4 +35,3 @@ server {
     proxy_set_header X-Forwarded-Proto $scheme;
   }
 }
-

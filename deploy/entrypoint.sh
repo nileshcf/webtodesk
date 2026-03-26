@@ -1,6 +1,10 @@
 #!/usr/bin/env sh
 set -eu
 
+PORT="${PORT:-80}"
+
+envsubst '${PORT}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
+
 start_jar() {
   jar_glob="$1"
   port="$2"
@@ -27,4 +31,3 @@ start_jar "/app/gateway/*.jar" "8080" "gateway"
 
 echo "Starting nginx..."
 nginx -g "daemon off;"
-
