@@ -30,7 +30,7 @@ COPY api-gateway/ api-gateway/
 COPY discovery-service/ discovery-service/
 COPY conversion-service/ conversion-service/
 
-RUN mvn -B -DskipTests clean package spring-boot:repackage \
+RUN mvn -B -DskipTests clean package org.springframework.boot:spring-boot-maven-plugin:repackage \
     -pl common,user-service,api-gateway,discovery-service,conversion-service -am
 
 
