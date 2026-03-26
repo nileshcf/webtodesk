@@ -50,3 +50,23 @@ export interface ElectronConfig {
   websiteUrl: string;
   files: Record<string, string>;
 }
+
+export interface UserProfileDetails {
+  userId: string;
+  email: string;
+  username: string;
+  name: string | null;
+  phoneNumber: number | null;
+  avatarUrl: string | null;
+  roles: string[];
+  emailVerified: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateProfileRequest {
+  username: string | null;
+  name: string | null;
+  phoneNumber: number | null;
+  avatarUrl: string | null;
+}

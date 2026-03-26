@@ -14,7 +14,41 @@ $root = $PSScriptRoot
 # 1. Discovery Service (Eureka - must start first)
 Write-Host "[1/5] Starting Discovery Service (port 8761)..." -ForegroundColor Yellow
 Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\discovery-service && mvnw.cmd spring-boot:run" -WindowStyle Normal
-Start-Sleep -Seconds 15  # Wait for Eureka to be ready
+
+# Wait for Eureka to be reachable before starting other services.
+# This avoids races where dependent services try to register before the Eureka server is ready.
+$eurekaHost = "localhost"
+$eurekaPort = 8761
+$eurekaUrl = "http://$eurekaHost`:$eurekaPort/eureka/apps"
+$deadline = (Get-Date).AddSeconds(60)
+
+while ((Get-Date) -lt $deadline) {
+  $portReady = $false
+  try {
+    $portReady = Test-NetConnection -ComputerName $eurekaHost -Port $eurekaPort -InformationLevel Quiet
+  } catch {
+    $portReady = $false
+  }
+
+  if ($portReady) {
+    $httpReady = $false
+    try {
+      # /eureka/apps is a lightweight endpoint that should respond once the server is up.
+      $null = Invoke-WebRequest -Uri $eurekaUrl -Method GET -TimeoutSec 2 -UseBasicParsing
+      $httpReady = $true
+    } catch {
+      $httpReady = $false
+    }
+
+    if ($httpReady) { break }
+  }
+
+  Start-Sleep -Seconds 2
+}
+
+if (-not (Test-NetConnection -ComputerName $eurekaHost -Port $eurekaPort -InformationLevel Quiet)) {
+  Write-Host "Warning: Eureka did not become ready within timeout. Continuing anyway..." -ForegroundColor Red
+}
 
 # 2. User Service
 Write-Host "[2/5] Starting User Service (port 8081)..." -ForegroundColor Yellow
