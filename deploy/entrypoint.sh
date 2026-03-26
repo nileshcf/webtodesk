@@ -3,6 +3,9 @@ set -eu
 
 PORT="${PORT:-80}"
 
+# ✅ FIX: ensure directory exists
+mkdir -p /etc/nginx/conf.d
+
 envsubst '${PORT}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
 
 start_jar() {

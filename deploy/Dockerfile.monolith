@@ -1,3 +1,4 @@
+# ---------- FRONTEND BUILD ----------
 FROM node:20-alpine AS frontend-builder
 
 WORKDIR /frontend
@@ -8,6 +9,8 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
+
+# ---------- BACKEND BUILD ----------
 FROM maven:3.9.9-eclipse-temurin-17-alpine AS backend-builder
 
 WORKDIR /build
@@ -29,26 +32,31 @@ COPY conversion-service/ conversion-service/
 
 RUN mvn -B -DskipTests package
 
+
+# ---------- FINAL IMAGE ----------
 FROM eclipse-temurin:17-jre-alpine
 
-RUN apk add --no-cache nginx bash gettext
+# Install nginx + required tools
+RUN apk add --no-cache nginx bash gettext \
+    && mkdir -p /run/nginx \
+    && mkdir -p /etc/nginx/conf.d
 
 WORKDIR /app
 
-# Nginx serves the frontend and proxies API calls back to the API gateway.
+# Copy nginx template
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
 
-# Starts discovery -> user -> conversion -> gateway, then keeps Nginx in the foreground.
+# Copy entrypoint
 COPY deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Backend jars built in the previous stage.
+# Copy backend jars
 COPY --from=backend-builder /build/discovery-service/target/*.jar /app/discovery/
 COPY --from=backend-builder /build/user-service/target/*.jar /app/user/
 COPY --from=backend-builder /build/conversion-service/target/*.jar /app/conversion/
 COPY --from=backend-builder /build/api-gateway/target/*.jar /app/gateway/
 
-# Frontend built in the previous stage.
+# Copy frontend build
 COPY --from=frontend-builder /frontend/dist/ /usr/share/nginx/html/
 
 EXPOSE 80
