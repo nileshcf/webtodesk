@@ -1,4 +1,4 @@
-app = "webtodesk"   # MUST match your GitHub secret
+app = "webtodesk-prod"   # MUST match your GitHub secret
 primary_region = "iad"
 
 [http_service]
