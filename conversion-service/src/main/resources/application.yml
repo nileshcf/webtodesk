@@ -6,7 +6,8 @@ spring:
     name: conversion-service
   data:
     mongodb:
-      uri: mongodb+srv://dbuser:dbuser%40123@cluster.fwne9bx.mongodb.net/webtodesk_conversions?appName=cluster
+      # Provided at runtime (GitHub Actions/Fly secrets)
+      uri: ${MONGODB_URI}
 
 eureka:
   client:
