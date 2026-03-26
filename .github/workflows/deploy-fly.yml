@@ -91,28 +91,38 @@ jobs:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           USER_SERVICE_REDIS_URL: ${{ secrets.USER_SERVICE_REDIS_URL }}
         run: |
+          # Fail if app name missing
           if [ -z "$FLY_APP_NAME" ]; then
             echo "Missing FLY_APP_NAME"
             exit 1
           fi
 
-          # Create app if it doesn't exist
+          # Ensure Fly auth
+          export FLY_API_TOKEN=$FLY_API_TOKEN
+
+          echo "Authenticating with Fly..."
+          flyctl auth whoami || true
+
+          # Create app if not exists
           if ! flyctl apps show "$FLY_APP_NAME" > /dev/null 2>&1; then
-            echo "Creating Fly app..."
+            echo "Creating Fly app: $FLY_APP_NAME"
             flyctl apps create "$FLY_APP_NAME"
           else
             echo "App already exists"
           fi
 
-          # Set secrets
+          # Set runtime secrets
           flyctl secrets set --app "$FLY_APP_NAME" \
             JWT_ACCESS_SECRET="$JWT_ACCESS_SECRET" \
             JWT_REFRESH_SECRET="$JWT_REFRESH_SECRET" \
             MONGODB_URI="$MONGODB_URI" \
             USER_SERVICE_REDIS_URL="$USER_SERVICE_REDIS_URL"
 
-          # Deploy
+          # Deploy image
           IMAGE="${{ env.REGISTRY_IMAGE }}:${{ env.IMAGE_TAG }}"
+
+          echo "Deploying image: $IMAGE"
+
           flyctl deploy \
             --app "$FLY_APP_NAME" \
             --config "$FLY_CONFIG" \
