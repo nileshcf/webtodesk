@@ -3,10 +3,10 @@ set -eu
 
 PORT="${PORT:-80}"
 
-# ✅ FIX: ensure directory exists
-mkdir -p /etc/nginx/conf.d
+# Alpine nginx includes files from /etc/nginx/http.d/*.conf
+mkdir -p /etc/nginx/http.d
 
-envsubst '${PORT}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
+envsubst '${PORT}' < /etc/nginx/templates/default.conf.template > /etc/nginx/http.d/default.conf
 
 start_jar() {
   jar_glob="$1"

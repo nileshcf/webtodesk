@@ -11,8 +11,6 @@ services:
         sync: false
       - key: JWT_REFRESH_SECRET
         sync: false
-      - key: USER_SERVICE_DB_PASSWORD
-        sync: false
       - key: USER_SERVICE_REDIS_URL
         sync: false
       - key: MONGODB_URI
