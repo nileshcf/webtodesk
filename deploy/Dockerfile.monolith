@@ -30,8 +30,8 @@ COPY api-gateway/ api-gateway/
 COPY discovery-service/ discovery-service/
 COPY conversion-service/ conversion-service/
 
-RUN mvn -B -DskipTests clean package -pl common,user-service,api-gateway,discovery-service,conversion-service -am \
-    && mvn -B -DskipTests spring-boot:repackage -pl user-service,api-gateway,discovery-service,conversion-service
+RUN mvn -B -DskipTests clean package spring-boot:repackage \
+    -pl common,user-service,api-gateway,discovery-service,conversion-service -am
 
 
 # ---------- FINAL IMAGE ----------
