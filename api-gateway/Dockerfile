@@ -7,6 +7,10 @@ COPY pom.xml .
 COPY common/ common/
 COPY api-gateway/ api-gateway/
 COPY user-service/pom.xml user-service/pom.xml
+# CHANGED: The Maven build previously failed with 'Child module does not exist' because the root pom.xml
+# requires all module poms to be present. Added the following two lines to copy the missing poms and fix the build.
+COPY conversion-service/pom.xml conversion-service/pom.xml
+COPY discovery-service/pom.xml discovery-service/pom.xml
 
 # Install common module first
 RUN mvn clean install -pl common -DskipTests

@@ -30,25 +30,25 @@ public class ConversionController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ConversionResponse> getById(@PathVariable String id) {
+    public ResponseEntity<ConversionResponse> getById(@PathVariable("id") String id) {
         return ResponseEntity.ok(conversionService.getById(id));
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<ConversionResponse> update(
-            @PathVariable String id,
-            @RequestBody UpdateConversionRequest request) {
+            @PathVariable("id") String id,
+            @RequestBody @Valid UpdateConversionRequest request) {
         return ResponseEntity.ok(conversionService.update(id, request));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable String id) {
+    public ResponseEntity<Void> delete(@PathVariable("id") String id) {
         conversionService.delete(id);
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{id}/generate")
-    public ResponseEntity<ElectronConfigResponse> generate(@PathVariable String id) {
+    public ResponseEntity<ElectronConfigResponse> generate(@PathVariable("id") String id) {
         return ResponseEntity.ok(conversionService.generateElectronProject(id));
     }
 }

@@ -10,10 +10,15 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $root = $PSScriptRoot
+# CHANGED: The startup was failing because the system JAVA_HOME pointed to JDK 11 (which had an invalid path).
+# Added the below line to explicitly set JAVA_HOME to JDK 17 for the microservices.
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-17"
 
 # 1. Discovery Service (Eureka - must start first)
 Write-Host "[1/5] Starting Discovery Service (port 8761)..." -ForegroundColor Yellow
-Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\discovery-service && mvnw.cmd spring-boot:run" -WindowStyle Normal
+# CHANGED: The original script failed because it tried to run 'mvnw.cmd' inside this subdirectory, but the wrapper is only in the root.
+# Changed 'mvnw.cmd' to '..\mvnw.cmd' to correctly point to the root directory wrapper.
+Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\discovery-service && ..\mvnw.cmd spring-boot:run" -WindowStyle Normal
 
 # Wait for Eureka to be reachable before starting other services.
 # This avoids races where dependent services try to register before the Eureka server is ready.
@@ -52,17 +57,20 @@ if (-not (Test-NetConnection -ComputerName $eurekaHost -Port $eurekaPort -Inform
 
 # 2. User Service
 Write-Host "[2/5] Starting User Service (port 8081)..." -ForegroundColor Yellow
-Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\user-service && mvnw.cmd spring-boot:run" -WindowStyle Normal
+# CHANGED: Updated 'mvnw.cmd' to '..\mvnw.cmd' because running it linearly without the parent path failed.
+Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\user-service && ..\mvnw.cmd spring-boot:run" -WindowStyle Normal
 Start-Sleep -Seconds 5
 
 # 3. Conversion Service
 Write-Host "[3/5] Starting Conversion Service (port 8082)..." -ForegroundColor Yellow
-Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\conversion-service && mvnw.cmd spring-boot:run" -WindowStyle Normal
+# CHANGED: Updated 'mvnw.cmd' to '..\mvnw.cmd'
+Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\conversion-service && ..\mvnw.cmd spring-boot:run" -WindowStyle Normal
 Start-Sleep -Seconds 5
 
 # 4. API Gateway
 Write-Host "[4/5] Starting API Gateway (port 8080)..." -ForegroundColor Yellow
-Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\api-gateway && mvnw.cmd spring-boot:run" -WindowStyle Normal
+# CHANGED: Updated 'mvnw.cmd' to '..\mvnw.cmd'
+Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\api-gateway && ..\mvnw.cmd spring-boot:run" -WindowStyle Normal
 Start-Sleep -Seconds 5
 
 # 5. React Frontend (Vite)
