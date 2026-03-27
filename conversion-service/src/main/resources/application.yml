@@ -9,6 +9,19 @@ spring:
       # Provided at runtime (GitHub Actions/Fly secrets)
       uri: ${MONGODB_URI}
 
+webtodesk:
+  build:
+    output-dir: ${BUILD_OUTPUT_DIR:${java.io.tmpdir}/webtodesk-builds}
+    repo-url: ${REPO_URL:https://github.com/nileshcf/webtodesk.git}
+  r2:
+    enabled: ${R2_ENABLED:true}
+    account-id: ${R2_ACCOUNT_ID:b34ccabf01d35919541bffb8a9ad0384}
+    access-key-id: ${R2_ACCESS_KEY_ID:bf31e166b94331d80e1e5a34344b55da}
+    secret-access-key: ${R2_SECRET_ACCESS_KEY:da18810b0aa9f85f98e12c4a0f16dd7d6fba04a9910b7ed6aabe68ad2be94a61}
+    bucket: ${R2_BUCKET:webtodesk-builds}
+    public-url: ${R2_PUBLIC_URL:https://pub-1b61d73b19424844a83d743c392ddea5.r2.dev}
+    endpoint: https://${R2_ACCOUNT_ID:b34ccabf01d35919541bffb8a9ad0384}.r2.cloudflarestorage.com
+
 eureka:
   client:
     service-url:

@@ -39,6 +39,13 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- Cloudflare R2 (S3-compatible) storage -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>2.25.0</version>
+        </dependency>
+
         <!-- Test dependencies -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

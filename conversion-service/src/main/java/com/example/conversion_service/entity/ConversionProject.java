@@ -34,6 +34,15 @@ public class ConversionProject {
 
     private String createdBy; // user email from gateway header
 
+    private String buildArtifactPath; // R2 public URL for the built artifact (nullable)
+    private String buildError;        // error message if build failed (nullable)
+
+    // ── GitHub Actions integration fields ──
+    private Long githubRunId;         // GitHub Actions workflow run ID
+    private String r2Key;             // R2 object key for the uploaded artifact
+    private String buildProgress;     // Granular progress: DISPATCHING, QUEUED, IN_PROGRESS, DOWNLOADING_ARTIFACT, UPLOADING_R2
+    private Instant buildStartedAt;   // When the build was triggered (for stale detection)
+
     @CreatedDate
     private Instant createdAt;
 
