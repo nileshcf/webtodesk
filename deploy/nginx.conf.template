@@ -9,12 +9,6 @@ server {
   access_log /dev/stdout;
   error_log /dev/stderr;
 
-  # ── Global CORS headers (only for proxied API routes) ──
-  # These ensure browsers accept responses even if the
-  # gateway hasn't set them yet (e.g. during error responses).
-  map "" $cors_origin {
-    default "";
-  }
 
   # SPA fallback (React/Vite)
   location / {
