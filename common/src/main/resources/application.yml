@@ -1,7 +1,7 @@
 jwt:
   # Provided at runtime (GitHub Actions/Fly secrets)
-  access-secret: ${JWT_ACCESS_SECRET}
-  refresh-secret: ${JWT_REFRESH_SECRET}
+  access-secret: ${JWT_ACCESS_SECRET:defaultSecretKeyWhichIsAtLeast32CharactersLongAndSecure}
+  refresh-secret: ${JWT_REFRESH_SECRET:defaultRefreshKeyWhichIsAtLeast32CharactersLongAndSecure}
   access-token-expiry: 900000      # 15 minutes in ms
   refresh-token-expiry: 2592000000 # 30 days in ms
   prefix: "Bearer "

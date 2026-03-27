@@ -1,7 +1,7 @@
 spring:
   data:
     mongodb:
-      uri: mongodb://localhost:27017/webtodesk_conversions
+      uri: ${MONGODB_URI:mongodb://localhost:27017/webtodesk_conversions}
 
 eureka:
   client:

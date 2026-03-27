@@ -3,8 +3,8 @@ server:
 
 jwt:
   # Provided at runtime (GitHub Actions/Fly secrets)
-  access-secret: ${JWT_ACCESS_SECRET}
-  refresh-secret: ${JWT_REFRESH_SECRET}
+  access-secret: ${JWT_ACCESS_SECRET:defaultSecretKeyWhichIsAtLeast32CharactersLongAndSecure}
+  refresh-secret: ${JWT_REFRESH_SECRET:defaultRefreshKeyWhichIsAtLeast32CharactersLongAndSecure}
   access-token-expiry: 900000
   refresh-token-expiry: 2592000000
   prefix: "Bearer "
@@ -14,6 +14,9 @@ spring:
     name: api-gateway
   cloud:
     gateway:
+      httpclient:
+        connect-timeout: 5000
+        response-timeout: 20s
       discovery:
         locator:
           enabled: false

@@ -1,3 +1,14 @@
+---
+title: WebToDesk
+emoji: 🖥️
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: Convert any website into a premium desktop application
+---
+
 # WebToDesk
 
 **Convert any website into a premium desktop application — in seconds.**
