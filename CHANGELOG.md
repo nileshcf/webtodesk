@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file.
 
 ---
 
+## [1.2.0] - 2026-03-27 — Conversion Service: Local Build Pipeline & SSE Streaming
+
+### Overview
+
+Completion of the Week 1 conversion service build pipeline. Replaced the proposed GitHub Actions workflow with a robust **Local Node.js/Electron Build Pipeline** using `ProcessBuilder`. Added real-time build log streaming via **Server-Sent Events (SSE)** and finalized the **Cloudflare R2** deployment strategy.
+
+### Added
+
+#### Local Build Orchestration
+- **`BuildService.java`**: Implemented generic `ProcessBuilder` logic to clone a base Electron template repository, write generated `config.js`, `main.js`, and `package.json` configurations into the local workspace, and execute `npm install` followed by `npx electron-builder --win`.
+- **`Workspace Cleanup`**: Added `FileSystemUtils.deleteRecursively()` to ensure temp build directories are purged after build completion or failure.
+
+#### Real-Time Streaming (SSE)
+- **`BuildService.java`**: Streams `stdout` and `stderr` directly from the local build process to the client via `SseEmitter`.
+- **`ConversionController.java`**: Added `GET /conversions/{id}/build/stream` endpoint returning `text/event-stream`.
+- **Frontend Integration**: Switched the React dashboard from a 10s polling interval to an active SSE stream using `@microsoft/fetch-event-source` to forward Bearer tokens properly. Added a pulsing progress bar mapping string statuses (Dispatching → Queued → Building → Uploading → Ready).
+
+#### Cloudflare R2 Upload
+- **`BuildService`**: After a successful local build, locates the generated `.exe` file in the `dist` folder and uploads it seamlessly to Cloudflare R2 using the `R2StorageService`. Emits the public R2 download URL back to the frontend.
+
+### Removed
+- Cancelled the `electron-build.yml` GitHub Actions setup as local builds orchestrate the process natively and faster.
+- Removed webhook callback endpoints that were intended for GitHub Actions since the backend tracks local build statuses intrinsically.
+- Removed the separate "Preview generated files" button from the frontend dashboard. 
+
+---
+
 ## [1.1.0] - 2026-03-27 — Conversion Service: Week 1 Foundation Hardening
 
 ### Overview

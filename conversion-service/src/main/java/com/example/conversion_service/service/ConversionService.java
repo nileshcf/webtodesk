@@ -94,6 +94,13 @@ public class ConversionService {
         );
     }
 
+    /**
+     * Exposes the raw entity for build status checks. Used by controller for BuildStatusResponse.
+     */
+    public ConversionProject findProjectById(String id) {
+        return findOrThrow(id);
+    }
+
     // ─── Private Helpers ──────────────────────────────────────
 
     private ConversionProject findOrThrow(String id) {
