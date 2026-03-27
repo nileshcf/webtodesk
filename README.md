@@ -22,6 +22,8 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 ### Current
 
 - **Website-to-Desktop Conversion** — Paste any URL and generate a ready-to-build Electron project
+- **Server-Side .exe Building** — Full local execution of `npm install` and `electron-builder` to generate `.exe` files and stream real-time logs via SSE
+- **Cloud Object Storage** — Automatically uploads generated artifacts to Cloudflare R2 for secure, scalable distribution
 - **Screenshot & Recording Protection** — OS-level content protection with visual deterrent overlay
 - **DevTools Blocking** — Prevents end-users from inspecting or modifying the wrapped app
 - **Cross-Platform Builds** — Generated projects support Windows (.exe/NSIS), macOS (.dmg), and Linux (AppImage)
@@ -36,7 +38,6 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 ### Planned
 
 - ⚠️ **Subscription & Billing** — Stripe/Razorpay integration with plan tiers and usage limits
-- ⚠️ **Server-Side .exe Building** — Cloud-based electron-builder pipeline (currently generates source files only)
 - ⚠️ **Email Verification** — Field exists but flow is not implemented
 - ⚠️ **Password Reset** — Endpoint references exist but no implementation
 - ⚠️ **Admin Panel** — Role enum exists (ROLE_ADMIN) but no admin UI or endpoints

@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Globe, Monitor, Trash2, Download, Loader2,
-  ExternalLink, X, AlertCircle, CheckCircle2, Sparkles, Rocket, Shield
+  ExternalLink, X, AlertCircle, CheckCircle2, Sparkles, Rocket, Shield,
+  Package, FileDown
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { conversionApi } from '../services/api';
@@ -17,6 +18,11 @@ export default function DashboardPage() {
   const [form, setForm] = useState({ projectName: '', websiteUrl: '', appTitle: '', iconFile: '' });
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
+  const [buildingIds, setBuildingIds] = useState<Set<string>>(new Set());
+  const [buildProgress, setBuildProgress] = useState<Record<string, string>>({});
+  const [buildLog, setBuildLog] = useState<Record<string, string>>({});
+  const [buildError, setBuildError] = useState<Record<string, string>>({});
+  const eventSources = useRef<Record<string, AbortController>>({});
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -36,7 +42,7 @@ export default function DashboardPage() {
     setFormError('');
     setFormLoading(true);
     try {
-      await conversionApi.create({
+      const created = await conversionApi.create({
         projectName: form.projectName,
         websiteUrl: form.websiteUrl,
         appTitle: form.appTitle,
@@ -44,7 +50,12 @@ export default function DashboardPage() {
       });
       setForm({ projectName: '', websiteUrl: '', appTitle: '', iconFile: '' });
       setShowForm(false);
-      fetchProjects();
+      
+      // Optimistically update projects list to show the new card immediately
+      setProjects(prev => [created, ...prev]);
+      
+      // Automatically trigger the build seamlessly
+      handleBuild(created.id);
     } catch (err: any) {
       setFormError(err.response?.data?.message || 'Failed to create project');
     } finally {
@@ -59,6 +70,124 @@ export default function DashboardPage() {
       fetchProjects();
     } catch {
       // handle error
+    }
+  };
+
+  const subscribeToBuild = useCallback((id: string) => {
+    // Clear any existing connection
+    if (eventSources.current[id]) {
+      eventSources.current[id].abort();
+    }
+
+    const ctrl = new AbortController();
+    eventSources.current[id] = ctrl;
+
+    const cleanup = () => {
+      ctrl.abort();
+      delete eventSources.current[id];
+      setBuildingIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+    };
+
+    import('@microsoft/fetch-event-source').then(({ fetchEventSource }) => {
+      const token = localStorage.getItem('accessToken');
+      fetchEventSource(`/conversion/conversions/${id}/build/stream`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        signal: ctrl.signal,
+        onmessage(e) {
+          if (e.event === 'progress') {
+            try {
+              const data = JSON.parse(e.data);
+              if (data.progress) {
+                setBuildProgress(prev => ({ ...prev, [id]: data.progress }));
+                if (data.message) {
+                  setBuildLog(prev => ({ ...prev, [id]: data.message }));
+                }
+              }
+              if (data.progress === 'COMPLETE' || data.progress === 'FAILED') {
+                if (data.progress === 'FAILED') {
+                  setBuildError(prev => ({ ...prev, [id]: data.message || 'Build failed' }));
+                }
+                cleanup();
+                fetchProjects();
+              }
+            } catch (err) {
+              console.error('SSE Progress parse error', err);
+            }
+          } else if (e.event === 'status') {
+            try {
+              const data = JSON.parse(e.data);
+              if (data.status === 'READY' || data.status === 'FAILED') {
+                if (data.status === 'FAILED' && data.buildError) {
+                  setBuildError(prev => ({ ...prev, [id]: data.buildError }));
+                }
+                cleanup();
+                fetchProjects();
+              } else if (data.buildProgress) {
+                 setBuildProgress(prev => ({ ...prev, [id]: data.buildProgress }));
+              }
+            } catch (err) {
+              console.error('SSE Status parse error', err);
+            }
+          }
+        },
+        onerror(err) {
+          console.warn(`SSE connection error for project ${id}`, err);
+          cleanup();
+          fetchProjects();
+          throw err; // Stop retrying
+        }
+      }).catch(err => {
+        if (err.name !== 'AbortError') {
+          console.error('fetchEventSource error', err);
+        }
+      });
+    });
+  }, [fetchProjects]);
+
+  // Clean up SSE connections on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(eventSources.current).forEach(ctrl => ctrl.abort());
+    };
+  }, []);
+
+  // Resume SSE for any projects that are BUILDING on load
+  useEffect(() => {
+    projects.forEach(p => {
+      if (p.status === 'BUILDING' && !buildingIds.has(p.id) && !eventSources.current[p.id]) {
+        setBuildingIds(prev => new Set(prev).add(p.id));
+        if (p.buildProgress) {
+          setBuildProgress(prev => ({ ...prev, [p.id]: p.buildProgress! }));
+        }
+        subscribeToBuild(p.id);
+      }
+    });
+  }, [projects, buildingIds, subscribeToBuild]);
+
+  const handleBuild = async (id: string) => {
+    setBuildError(prev => { const next = { ...prev }; delete next[id]; return next; });
+    setBuildingIds(prev => new Set(prev).add(id));
+    try {
+      await conversionApi.build(id);
+      setBuildProgress(prev => ({ ...prev, [id]: 'PREPARING' }));
+      fetchProjects();
+      subscribeToBuild(id);
+    } catch (err: any) {
+      setBuildingIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+      setBuildError(prev => ({ ...prev, [id]: err.response?.data?.message || 'Build trigger failed' }));
+    }
+  };
+
+  const handleDownload = (project: ConversionProject) => {
+    // If the project has a direct R2 download URL, use it
+    if (project.downloadUrl) {
+      window.open(project.downloadUrl, '_blank');
+    } else {
+      // Fallback: use the gateway-proxied endpoint which 302-redirects to R2
+      window.open(conversionApi.getDownloadUrl(project.id), '_blank');
     }
   };
 
@@ -290,12 +419,42 @@ export default function DashboardPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <button
-                      onClick={() => handleGenerate(project.id)}
-                      className="btn-ghost !py-2 !px-4 !text-xs flex items-center gap-1.5"
-                    >
-                      <Download size={13} /> Generate
-                    </button>
+                    {project.status === 'READY' && project.downloadAvailable && (
+                      <button
+                        onClick={() => handleDownload(project)}
+                        className="btn-accent !py-2 !px-4 !text-xs flex items-center gap-1.5"
+                      >
+                        <FileDown size={13} /> Download .exe
+                      </button>
+                    )}
+                    {buildingIds.has(project.id) || project.status === 'BUILDING' ? (
+                      <button
+                        disabled
+                        className="btn-ghost !py-2 !px-4 !text-xs flex items-center gap-1.5 opacity-80 cursor-wait relative overflow-hidden"
+                      >
+                        <div className="absolute inset-0 bg-accent-blue/10 animate-pulse" />
+                        <Loader2 size={13} className="animate-spin text-accent-blue relative z-10" />
+                        <span className="relative z-10 text-accent-blue font-medium truncate max-w-[200px]" title={buildProgress[project.id] === 'BUILD_LOG' ? buildLog[project.id] : ''}>
+                          {buildProgress[project.id] === 'PREPARING' ? 'Preparing...' :
+                           buildProgress[project.id] === 'CLONING' ? 'Cloning repo...' :
+                           buildProgress[project.id] === 'WRITING_FILES' ? 'Configuring...' :
+                           buildProgress[project.id] === 'INSTALLING' ? 'Installing deps...' :
+                           buildProgress[project.id] === 'BUILDING' ? 'Building exe...' :
+                           buildProgress[project.id] === 'FINDING_ARTIFACT' ? 'Locating artifact...' :
+                           buildProgress[project.id] === 'UPLOADING_R2' ? 'Uploading...' :
+                           buildProgress[project.id] === 'BUILD_LOG' ? (buildLog[project.id] || 'Building...') :
+                           (project.buildProgress || 'Building...')}
+                        </span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleBuild(project.id)}
+                        className="btn-ghost !py-2 !px-4 !text-xs flex items-center gap-1.5"
+                      >
+                        <Package size={13} /> Build .exe
+                      </button>
+                    )}
+
                     <button
                       onClick={() => handleDelete(project.id)}
                       className="p-2 rounded-xl text-white/20 hover:text-red-400 hover:bg-red-500/10 transition-all"
@@ -304,6 +463,13 @@ export default function DashboardPage() {
                     </button>
                   </div>
                 </div>
+                {/* Build error message */}
+                {(buildError[project.id] || (project.status === 'FAILED' && project.buildError)) && (
+                  <div className="flex items-center gap-2 mt-3 p-2.5 rounded-lg bg-red-500/10 border border-red-500/20">
+                    <AlertCircle size={14} className="text-red-400 flex-shrink-0" />
+                    <p className="text-xs text-red-300">{buildError[project.id] || project.buildError}</p>
+                  </div>
+                )}
               </motion.div>
             ))}
           </motion.div>
