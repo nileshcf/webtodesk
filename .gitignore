@@ -60,3 +60,5 @@ frontend/.env.local
 # Docker
 ############################
 **/*.log
+
+!**/target/*.jar
