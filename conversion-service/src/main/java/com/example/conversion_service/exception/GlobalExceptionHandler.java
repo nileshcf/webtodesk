@@ -4,6 +4,7 @@ import com.example.conversion_service.dto.ErrorResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -44,6 +45,14 @@ public class GlobalExceptionHandler {
         log.warn("Bad request at {}: {}", getPath(request), ex.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ErrorResponse.of(ex.getMessage(), getPath(request)));
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException ex, WebRequest request) {
+        // Render port probes may call "/" or HEAD "/" directly on internal service ports.
+        log.debug("No resource at {}: {}", getPath(request), ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ErrorResponse.of("Resource not found", getPath(request)));
     }
 
     @ExceptionHandler(Exception.class)
