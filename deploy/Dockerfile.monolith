@@ -59,6 +59,6 @@ COPY --from=backend-builder /build/api-gateway/target/*.jar /app/gateway/
 # Copy frontend build
 COPY --from=frontend-builder /frontend/dist/ /usr/share/nginx/html/
 
-EXPOSE 80
+EXPOSE 7860
 
 ENTRYPOINT ["/entrypoint.sh"]

@@ -4,6 +4,12 @@ spring:
     username: ${USER_SERVICE_DB_USERNAME}
     password: ${USER_SERVICE_DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 8000
+      validation-timeout: 3000
+      initialization-fail-timeout: 10000
+      maximum-pool-size: 5
+      minimum-idle: 1
 
   jpa:
     hibernate:
@@ -17,3 +23,4 @@ spring:
   data:
     redis:
       url: ${USER_SERVICE_REDIS_URL}
+      timeout: 3s
