@@ -1,15 +1,14 @@
 server:
-  port: 8082
+  port: ${SERVER_PORT:8082}
 
 spring:
   application:
     name: conversion-service
   data:
     mongodb:
-      # Provided at runtime (GitHub Actions/Fly secrets)
-      uri: ${MONGODB_URI}
+      uri: ${MONGODB_URI:mongodb+srv://dbuser:dbuser%40123@cluster.fwne9bx.mongodb.net/webtodesk_conversions?appName=cluster}
 
 eureka:
   client:
     service-url:
-      defaultZone: http://localhost:8761/eureka/
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
