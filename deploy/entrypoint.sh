@@ -2,6 +2,7 @@
 set -eu
 
 PORT="${PORT:-7860}"
+export PORT
 export SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-dev}"
 
 # Alpine nginx includes files from /etc/nginx/http.d/*.conf
