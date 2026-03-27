@@ -16,13 +16,13 @@ public class AuthController {
 
     // Endpoint: POST /user/auth/register (via Gateway)
     @PostMapping("/register")
-    public ResponseEntity<RegisterResponse> register(@RequestBody SignupRequest request) {
+    public ResponseEntity<RegisterResponse> register(@RequestBody @Valid SignupRequest request) {
         return ResponseEntity.ok(authService.register(request));
     }
 
     // Endpoint: POST /user/auth/login (via Gateway)
     @PostMapping("/login")
-    public ResponseEntity<LoginResponse> login(@RequestBody LoginRequest request) {
+    public ResponseEntity<LoginResponse> login(@RequestBody @Valid LoginRequest request) {
         return ResponseEntity.ok(authService.login(request));
     }
     @PostMapping("/refresh")
