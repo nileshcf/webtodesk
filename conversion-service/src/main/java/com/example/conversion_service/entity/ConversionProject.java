@@ -119,6 +119,8 @@ public class ConversionProject {
     // ── Module system (nullable — existing documents stay valid) ──
     private List<String> enabledModules; // keys of enabled modules, e.g. ["offline", "splash-screen"]
 
+    private String targetPlatform;       // "win" | "linux" — set by user in wizard, overrides server env var
+
     @CreatedDate
 
     private Instant createdAt;

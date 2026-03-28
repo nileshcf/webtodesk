@@ -62,6 +62,10 @@ public class ConversionService {
 
                 .createdBy(createdBy)
 
+                .enabledModules(request.enabledModules())
+
+                .targetPlatform(request.targetPlatform())
+
                 .build();
 
 
@@ -113,6 +117,10 @@ public class ConversionService {
         if (request.iconFile() != null) project.setIconFile(request.iconFile());
 
         if (request.currentVersion() != null) project.setCurrentVersion(request.currentVersion());
+
+        if (request.enabledModules() != null) project.setEnabledModules(request.enabledModules());
+
+        if (request.targetPlatform() != null) project.setTargetPlatform(request.targetPlatform());
 
 
 

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Monitor, Globe, Tag, Cpu, ChevronRight, ChevronLeft, Check } from 'lucide-react';
 import { LicenseTier } from '../types/license';
 
 // ─── Types ──────────────────────────────────────────────
@@ -17,10 +18,12 @@ interface WizardData {
   appTitle: string;
   iconFile: string;
   enabledModules: string[];
+  targetPlatform: 'auto' | 'win' | 'linux';
 }
 
 interface ProjectWizardProps {
   userTier?: LicenseTier;
+  devMode?: boolean;
   initialData?: Partial<WizardData>;
   onSubmit: (data: WizardData) => void | Promise<void>;
   onCancel: () => void;
@@ -68,20 +71,19 @@ const ALL_MODULES: ModuleInfo[] = [
 ];
 
 const STEPS = ['Basic Info', 'Features', 'Review'] as const;
-type Step = typeof STEPS[number];
 
 // ─── Tier badge helper ──────────────────────────────────
 
 const tierColors: Record<string, string> = {
-  TRIAL:    'bg-gray-100 text-gray-600',
-  STARTER:  'bg-blue-100 text-blue-700',
-  PRO:      'bg-purple-100 text-purple-700',
-  LIFETIME: 'bg-amber-100 text-amber-700',
+  TRIAL:    'bg-white/5 text-white/50 border border-white/10',
+  STARTER:  'bg-accent-blue/10 text-accent-blue border border-accent-blue/20',
+  PRO:      'bg-purple-500/10 text-purple-300 border border-purple-500/20',
+  LIFETIME: 'bg-amber-500/10 text-amber-300 border border-amber-500/20',
 };
 
 function TierPill({ tier }: { tier: string }) {
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${tierColors[tier] ?? 'bg-gray-100 text-gray-600'}`}>
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${tierColors[tier] ?? 'bg-white/5 text-white/40'}`}>
       {tier}
     </span>
   );
@@ -99,49 +101,51 @@ function BasicInfoStep({
   return (
     <div className="space-y-5">
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Project Name <span className="text-red-500">*</span>
+        <label className="block text-xs font-medium text-white/50 uppercase tracking-wider mb-2">
+          <Globe size={11} className="inline mr-1.5 mb-0.5" />
+          Project Name <span className="text-red-400">*</span>
         </label>
         <input
           type="text"
           value={data.projectName}
           onChange={e => onChange({ projectName: e.target.value })}
           placeholder="my-awesome-app"
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="input-field text-sm"
         />
-        <p className="mt-1 text-xs text-gray-500">
-          Letters, numbers, hyphens and underscores only (max 64 chars).
-        </p>
+        <p className="mt-1.5 text-xs text-white/25">Letters, numbers, hyphens and underscores only (max 64 chars).</p>
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Website URL <span className="text-red-500">*</span>
+        <label className="block text-xs font-medium text-white/50 uppercase tracking-wider mb-2">
+          <Globe size={11} className="inline mr-1.5 mb-0.5" />
+          Website URL <span className="text-red-400">*</span>
         </label>
         <input
           type="url"
           value={data.websiteUrl}
           onChange={e => onChange({ websiteUrl: e.target.value })}
           placeholder="https://yourapp.com"
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="input-field text-sm"
         />
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          App Title <span className="text-red-500">*</span>
+        <label className="block text-xs font-medium text-white/50 uppercase tracking-wider mb-2">
+          <Tag size={11} className="inline mr-1.5 mb-0.5" />
+          App Title <span className="text-red-400">*</span>
         </label>
         <input
           type="text"
           value={data.appTitle}
           onChange={e => onChange({ appTitle: e.target.value })}
           placeholder="My Awesome App"
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="input-field text-sm"
         />
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
+        <label className="block text-xs font-medium text-white/50 uppercase tracking-wider mb-2">
+          <Monitor size={11} className="inline mr-1.5 mb-0.5" />
           Icon File
         </label>
         <input
@@ -149,11 +153,9 @@ function BasicInfoStep({
           value={data.iconFile}
           onChange={e => onChange({ iconFile: e.target.value })}
           placeholder="icon.ico"
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="input-field text-sm"
         />
-        <p className="mt-1 text-xs text-gray-500">
-          Leave blank to use the default icon.ico.
-        </p>
+        <p className="mt-1.5 text-xs text-white/25">Leave blank to use the default icon.ico.</p>
       </div>
     </div>
   );
@@ -165,10 +167,12 @@ function FeaturesStep({
   data,
   onChange,
   userTier,
+  devMode,
 }: {
   data: WizardData;
   onChange: (patch: Partial<WizardData>) => void;
   userTier: LicenseTier;
+  devMode: boolean;
 }) {
   const tierRank: Record<LicenseTier, number> = {
     [LicenseTier.TRIAL]:    0,
@@ -178,7 +182,7 @@ function FeaturesStep({
   };
 
   const isAccessible = (requiredTier: LicenseTier) =>
-    tierRank[userTier] >= tierRank[requiredTier];
+    devMode || tierRank[userTier] >= tierRank[requiredTier];
 
   const toggleModule = (key: string, accessible: boolean) => {
     if (!accessible) return;
@@ -192,9 +196,17 @@ function FeaturesStep({
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-gray-600">
-        Select the modules to include in your desktop app. Locked modules require a plan upgrade.
+      {devMode && (
+        <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/20 px-3 py-2.5">
+          <span className="text-amber-400 text-xs font-bold">⚡ DEV MODE</span>
+          <span className="text-amber-300/80 text-xs">All modules unlocked — tier limits bypassed.</span>
+        </div>
+      )}
+
+      <p className="text-xs text-white/40">
+        Toggle the modules to bundle in your desktop app.{!devMode && ' Locked modules require a plan upgrade.'}
       </p>
+
       {ALL_MODULES.map(mod => {
         const accessible = isAccessible(mod.requiredTier);
         const enabled = data.enabledModules.includes(mod.key);
@@ -203,52 +215,65 @@ function FeaturesStep({
           <div
             key={mod.key}
             onClick={() => toggleModule(mod.key, accessible)}
-            className={`flex items-start gap-3 rounded-xl border p-4 transition-colors ${
+            className={`flex items-start gap-3 rounded-xl border p-3.5 transition-all ${
               !accessible
-                ? 'cursor-not-allowed border-gray-200 bg-gray-50 opacity-60'
+                ? 'cursor-not-allowed border-white/5 bg-white/[0.02] opacity-40'
                 : enabled
-                ? 'cursor-pointer border-indigo-400 bg-indigo-50'
-                : 'cursor-pointer border-gray-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/30'
+                ? 'cursor-pointer border-accent-blue/40 bg-accent-blue/10'
+                : 'cursor-pointer border-white/8 bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.06]'
             }`}
           >
-            {/* Checkbox */}
-            <div
-              className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border-2 transition-colors ${
-                !accessible
-                  ? 'border-gray-300 bg-gray-100'
-                  : enabled
-                  ? 'border-indigo-600 bg-indigo-600'
-                  : 'border-gray-300 bg-white'
-              }`}
-            >
-              {enabled && accessible && (
-                <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              )}
-              {!accessible && (
-                <svg className="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
-              )}
+            <div className="mt-0.5 flex-shrink-0">
+              <div className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                !accessible ? 'bg-white/10' : enabled ? 'bg-accent-blue' : 'bg-white/15'
+              }`}>
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                  enabled && accessible ? 'translate-x-4' : 'translate-x-0.5'
+                }`} />
+              </div>
             </div>
-
-            {/* Content */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-semibold text-gray-800">{mod.name}</span>
-                <TierPill tier={mod.requiredTier} />
+                <span className="text-sm font-semibold text-white">{mod.name}</span>
+                {devMode
+                  ? <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/25">DEV</span>
+                  : <TierPill tier={mod.requiredTier} />}
               </div>
-              <p className="mt-0.5 text-xs text-gray-500">{mod.description}</p>
-              {!accessible && (
-                <p className="mt-1 text-xs font-medium text-amber-600">
-                  Requires {mod.requiredTier} plan
-                </p>
+              <p className="mt-0.5 text-xs text-white/40">{mod.description}</p>
+              {!accessible && !devMode && (
+                <p className="mt-1 text-xs font-medium text-amber-400/70">Requires {mod.requiredTier} plan</p>
               )}
             </div>
           </div>
         );
       })}
+
+      {/* OS Target — win / linux only, no auto */}
+      <div className="mt-2 pt-4 border-t border-white/[0.06]">
+        <p className="text-xs font-medium text-white/50 uppercase tracking-wider mb-2.5">
+          <Cpu size={11} className="inline mr-1.5 mb-0.5" />
+          Build Target OS
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {(['win', 'linux'] as const).map(t => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => onChange({ targetPlatform: t })}
+              className={`rounded-xl border px-4 py-3 text-sm font-semibold transition-all ${
+                data.targetPlatform === t
+                  ? 'border-accent-blue/50 bg-accent-blue/15 text-white'
+                  : 'border-white/8 bg-white/[0.03] text-white/50 hover:border-white/15 hover:text-white/80'
+              }`}
+            >
+              {t === 'win' ? '🪟 Windows' : '🐧 Linux'}
+              <span className="block text-xs font-normal mt-0.5 opacity-60">
+                {t === 'win' ? '.exe / .msi' : '.AppImage / .deb'}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -257,38 +282,33 @@ function FeaturesStep({
 
 function ReviewStep({ data }: { data: WizardData }) {
   const moduleNames = ALL_MODULES.filter(m => data.enabledModules.includes(m.key)).map(m => m.name);
+  const osLabel = data.targetPlatform === 'win' ? '🪟 Windows (.exe / .msi)' : '🐧 Linux (.AppImage / .deb)';
 
   return (
-    <div className="space-y-5">
-      <p className="text-sm text-gray-600">Review your configuration before creating the project.</p>
+    <div className="space-y-4">
+      <p className="text-xs text-white/40">Review your configuration before creating the project.</p>
 
-      <div className="rounded-xl border border-gray-200 overflow-hidden divide-y divide-gray-100">
+      <div className="rounded-xl border border-white/[0.07] overflow-hidden divide-y divide-white/[0.04]">
         {[
           { label: 'Project Name', value: data.projectName || '—' },
           { label: 'Website URL',  value: data.websiteUrl  || '—' },
           { label: 'App Title',    value: data.appTitle    || '—' },
-          { label: 'Icon File',    value: data.iconFile || 'icon.ico (default)' },
+          { label: 'Icon',         value: data.iconFile || 'icon.ico (default)' },
+          { label: 'Build Target', value: osLabel },
         ].map(row => (
           <div key={row.label} className="flex items-baseline gap-4 px-4 py-3">
-            <span className="w-36 flex-shrink-0 text-xs font-medium text-gray-500 uppercase tracking-wide">
-              {row.label}
-            </span>
-            <span className="text-sm text-gray-800 break-all">{row.value}</span>
+            <span className="w-28 flex-shrink-0 text-xs font-medium text-white/35 uppercase tracking-wide">{row.label}</span>
+            <span className="text-sm text-white/80 break-all">{row.value}</span>
           </div>
         ))}
         <div className="flex items-baseline gap-4 px-4 py-3">
-          <span className="w-36 flex-shrink-0 text-xs font-medium text-gray-500 uppercase tracking-wide">
-            Modules
-          </span>
+          <span className="w-28 flex-shrink-0 text-xs font-medium text-white/35 uppercase tracking-wide">Modules</span>
           {moduleNames.length === 0 ? (
-            <span className="text-sm text-gray-400">None selected</span>
+            <span className="text-sm text-white/30">None selected</span>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {moduleNames.map(name => (
-                <span
-                  key={name}
-                  className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700"
-                >
+                <span key={name} className="inline-flex items-center rounded-full bg-accent-blue/15 border border-accent-blue/25 px-2 py-0.5 text-xs font-medium text-accent-blue">
                   {name}
                 </span>
               ))}
@@ -304,6 +324,7 @@ function ReviewStep({ data }: { data: WizardData }) {
 
 export default function ProjectWizard({
   userTier = LicenseTier.TRIAL,
+  devMode = false,
   initialData,
   onSubmit,
   onCancel,
@@ -317,6 +338,7 @@ export default function ProjectWizard({
     appTitle:    '',
     iconFile:    '',
     enabledModules: [],
+    targetPlatform: 'linux',
     ...initialData,
   });
 
@@ -353,73 +375,65 @@ export default function ProjectWizard({
   return (
     <div className="flex flex-col h-full">
       {/* Step indicators */}
-      <div className="flex items-center gap-0 px-6 pt-6 pb-5">
+      <div className="flex items-center px-6 pt-5 pb-4">
         {STEPS.map((label, idx) => (
           <div key={label} className="flex items-center">
             <div className="flex items-center gap-2">
-              <div
-                className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold transition-colors ${
-                  idx < step
-                    ? 'bg-indigo-600 text-white'
-                    : idx === step
-                    ? 'bg-indigo-600 text-white ring-4 ring-indigo-100'
-                    : 'bg-gray-200 text-gray-500'
-                }`}
-              >
-                {idx < step ? (
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  idx + 1
-                )}
+              <div className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold transition-all ${
+                idx < step
+                  ? 'bg-white text-black'
+                  : idx === step
+                  ? 'bg-accent-blue text-white'
+                  : 'bg-white/10 text-white/30'
+              }`}>
+                {idx < step ? <Check size={12} strokeWidth={3} /> : idx + 1}
               </div>
-              <span
-                className={`text-sm font-medium ${
-                  idx === step ? 'text-indigo-700' : idx < step ? 'text-gray-700' : 'text-gray-400'
-                }`}
-              >
-                {label}
-              </span>
+              <span className={`text-xs font-medium ${
+                idx === step ? 'text-white' : idx < step ? 'text-white/50' : 'text-white/25'
+              }`}>{label}</span>
             </div>
             {idx < STEPS.length - 1 && (
-              <div className={`mx-3 h-px w-10 ${idx < step ? 'bg-indigo-400' : 'bg-gray-200'}`} />
+              <div className={`mx-3 h-px w-8 transition-colors ${idx < step ? 'bg-white/30' : 'bg-white/8'}`} />
             )}
           </div>
         ))}
       </div>
 
       {/* Step content */}
-      <div className="flex-1 overflow-y-auto px-6">
+      <div className="flex-1 overflow-y-auto px-6 pb-2">
         {step === 0 && <BasicInfoStep data={data} onChange={onChange} />}
-        {step === 1 && <FeaturesStep data={data} onChange={onChange} userTier={userTier} />}
+        {step === 1 && <FeaturesStep data={data} onChange={onChange} userTier={userTier} devMode={devMode} />}
         {step === 2 && <ReviewStep data={data} />}
       </div>
 
       {/* Navigation */}
-      <div className="flex items-center justify-between border-t border-gray-200 px-6 py-4 mt-4">
+      <div className="flex items-center justify-between border-t border-white/[0.06] px-6 py-4">
         <button
+          type="button"
           onClick={step === 0 ? onCancel : handleBack}
-          className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          className="btn-ghost !py-2 !px-4 !text-sm flex items-center gap-1.5"
         >
+          {step > 0 && <ChevronLeft size={14} />}
           {step === 0 ? 'Cancel' : 'Back'}
         </button>
 
         {isLastStep ? (
           <button
+            type="button"
             onClick={handleSubmit}
             disabled={submitting}
-            className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+            className="btn-primary !py-2 !px-5 !text-sm"
           >
             {submitting ? 'Creating…' : submitLabel}
           </button>
         ) : (
           <button
+            type="button"
             onClick={handleNext}
             disabled={!canProceed()}
-            className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+            className="btn-primary !py-2 !px-5 !text-sm flex items-center gap-1.5"
           >
-            Next
+            Next <ChevronRight size={14} />
           </button>
         )}
       </div>

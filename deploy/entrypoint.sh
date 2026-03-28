@@ -5,10 +5,11 @@ PORT="${PORT:-7860}"
 export PORT
 export SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-dev}"
 
-# Alpine nginx includes files from /etc/nginx/http.d/*.conf
-mkdir -p /etc/nginx/http.d
+# Ubuntu nginx includes files from /etc/nginx/conf.d/*.conf
+mkdir -p /etc/nginx/conf.d
+rm -f /etc/nginx/sites-enabled/default
 
-envsubst '${PORT}' < /etc/nginx/templates/default.conf.template > /etc/nginx/http.d/default.conf
+envsubst '${PORT}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
 
 start_jar() {
   jar_glob="$1"

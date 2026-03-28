@@ -3,6 +3,7 @@ package com.example.conversion_service.dto;
 import com.example.conversion_service.entity.ConversionProject;
 
 import java.time.Instant;
+import java.util.List;
 
 public record ConversionResponse(
         String id,
@@ -18,7 +19,9 @@ public record ConversionResponse(
         String downloadUrl,
         String buildProgress,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        List<String> enabledModules,
+        String targetPlatform
 ) {
     public static ConversionResponse from(ConversionProject project) {
         boolean isReady = project.getBuildArtifactPath() != null
@@ -37,7 +40,9 @@ public record ConversionResponse(
                 isReady ? project.getBuildArtifactPath() : null,
                 project.getBuildProgress(),
                 project.getCreatedAt(),
-                project.getUpdatedAt()
+                project.getUpdatedAt(),
+                project.getEnabledModules(),
+                project.getTargetPlatform()
         );
     }
 }

@@ -62,7 +62,7 @@ public class BuildController {
     @GetMapping("/status/{projectId}")
     public ResponseEntity<BuildStatusResponse> getBuildStatus(
             @PathVariable("projectId") String projectId,
-            @RequestParam(required = false) String targetOS) {
+            @RequestParam(value = "targetOS", required = false) String targetOS) {
         ConversionProject project = conversionService.findProjectById(projectId);
         return ResponseEntity.ok(BuildStatusResponse.from(project));
     }
@@ -73,7 +73,7 @@ public class BuildController {
     @GetMapping("/progress/{projectId}")
     public SseEmitter getBuildProgress(
             @PathVariable("projectId") String projectId,
-            @RequestParam(required = false) String targetOS) {
+            @RequestParam(value = "targetOS", required = false) String targetOS) {
         return buildService.createSseEmitter(projectId);
     }
 
@@ -98,7 +98,7 @@ public class BuildController {
     @PostMapping("/cancel/{projectId}")
     public ResponseEntity<Void> cancelBuild(
             @PathVariable("projectId") String projectId,
-            @RequestParam(required = false) String targetOS) {
+            @RequestParam(value = "targetOS", required = false) String targetOS) {
         log.info("Cancel requested for project {}", projectId);
         return ResponseEntity.ok().build();
     }
@@ -109,7 +109,7 @@ public class BuildController {
     @PostMapping("/retry/{projectId}")
     public ResponseEntity<BuildStatusResponse> retryBuild(
             @PathVariable("projectId") String projectId,
-            @RequestParam(required = false) String targetOS) {
+            @RequestParam(value = "targetOS", required = false) String targetOS) {
         ConversionResponse project = conversionService.getById(projectId);
         buildService.triggerBuild(projectId);
         return ResponseEntity.accepted().body(
@@ -148,7 +148,7 @@ public class BuildController {
     @GetMapping("/metrics")
     public ResponseEntity<Map<String, Object>> getBuildMetrics(
             @RequestHeader("X-User-Email") String userEmail,
-            @RequestParam(defaultValue = "month") String period) {
+            @RequestParam(value = "period", defaultValue = "month") String period) {
         return ResponseEntity.ok(Map.of(
                 "queueStats", buildQueueService.getQueueStatus(),
                 "recentBuilds", buildMetricsService.getUserBuildHistory(userEmail, 10)
@@ -162,7 +162,7 @@ public class BuildController {
     @GetMapping("/history/{projectId}")
     public ResponseEntity<List<BuildRecordResponse>> getBuildHistory(
             @PathVariable("projectId") String projectId,
-            @RequestParam(defaultValue = "10") int limit) {
+            @RequestParam(value = "limit", defaultValue = "10") int limit) {
         return ResponseEntity.ok(buildMetricsService.getBuildHistory(projectId, limit));
     }
 
@@ -180,7 +180,7 @@ public class BuildController {
      */
     @GetMapping("/modules")
     public ResponseEntity<List<ModuleInfoResponse>> listModules(
-            @RequestParam(required = false, defaultValue = "TRIAL") String tier) {
+            @RequestParam(value = "tier", required = false, defaultValue = "TRIAL") String tier) {
         LicenseTier licenseTier;
         try {
             licenseTier = LicenseTier.valueOf(tier.toUpperCase());
@@ -215,7 +215,7 @@ public class BuildController {
     @GetMapping("/logs/{projectId}")
     public ResponseEntity<List<String>> getBuildLogs(
             @PathVariable("projectId") String projectId,
-            @RequestParam(required = false) String targetOS) {
+            @RequestParam(value = "targetOS", required = false) String targetOS) {
         ConversionProject project = conversionService.findProjectById(projectId);
         String progress = project.getBuildProgress() != null ? project.getBuildProgress() : "UNKNOWN";
         String error = project.getBuildError() != null ? project.getBuildError() : "";

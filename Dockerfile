@@ -34,13 +34,19 @@ RUN mvn -B -DskipTests clean package -pl common,user-service,api-gateway,discove
 
 
 # ---------- FINAL IMAGE ----------
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:17-jre-jammy
 
 # Install nginx, Node.js (for conversion-service Electron builds) and required tools
-RUN apk add --no-cache nginx bash gettext nodejs npm python3 build-base glib gcompat \
+RUN dpkg --add-architecture i386 \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    nginx bash gettext nodejs python3 build-essential wine wine32 wine64 winbind libfuse2 \
     && mkdir -p /run/nginx \
     && mkdir -p /etc/nginx/conf.d \
-    && mkdir -p /tmp/electron-cache /tmp/npm-cache
+    && mkdir -p /tmp/electron-cache /tmp/npm-cache \
+    && rm -rf /var/lib/apt/lists/*
 
 # Cache dirs and flags for electron-builder inside Docker
 ENV CI=true \

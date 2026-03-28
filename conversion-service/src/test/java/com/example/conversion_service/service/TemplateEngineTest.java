@@ -63,21 +63,28 @@ class TemplateEngineTest {
 
     @Test
     void render_packageMustache_containsProjectName() {
-        Map<String, Object> ctx = Map.of(
-                "projectName",    "pkg-app",
-                "currentVersion", "2.0.0",
-                "appTitle",       "Pkg App",
-                "websiteUrl",     "https://pkg.com",
-                "iconFile",       "icon.ico",
-                "modulesJson",    "[]",
-                "hasModules",     false,
-                "moduleRequires", "",
-                "moduleSetups",   ""
+        Map<String, Object> ctx = Map.ofEntries(
+                Map.entry("projectName",    "pkg-app"),
+                Map.entry("npmPackageName", "pkg-app"),
+                Map.entry("appId",          "com.webtodesk.pkg.app"),
+                Map.entry("currentVersion", "2.0.0"),
+                Map.entry("appTitle",       "Pkg App"),
+                Map.entry("websiteUrl",     "https://pkg.com"),
+                Map.entry("iconFile",       "icon.ico"),
+                Map.entry("modulesJson",    "[]"),
+                Map.entry("hasModules",     false),
+                Map.entry("moduleRequires", ""),
+                Map.entry("moduleSetups",   ""),
+                Map.entry("isWin",          false),
+                Map.entry("isMac",          false),
+                Map.entry("isLinux",        true),
+                Map.entry("linuxTarget",    "AppImage")
         );
 
         String result = templateEngine.render("package.mustache", ctx);
 
         assertThat(result).contains("pkg-app");
+        assertThat(result).contains("com.webtodesk.pkg.app");
         assertThat(result).contains("2.0.0");
         assertThat(result).contains("electron-builder");
     }
@@ -102,16 +109,22 @@ class TemplateEngineTest {
 
     @Test
     void render_multipleTemplates_cachesAllUnique() {
-        Map<String, Object> ctx = Map.of(
-                "projectName",    "multi",
-                "currentVersion", "1.0.0",
-                "appTitle",       "Multi",
-                "websiteUrl",     "https://multi.com",
-                "iconFile",       "icon.ico",
-                "modulesJson",    "[]",
-                "hasModules",     false,
-                "moduleRequires", "",
-                "moduleSetups",   ""
+        Map<String, Object> ctx = Map.ofEntries(
+                Map.entry("projectName",    "multi"),
+                Map.entry("npmPackageName", "multi"),
+                Map.entry("appId",          "com.webtodesk.multi"),
+                Map.entry("currentVersion", "1.0.0"),
+                Map.entry("appTitle",       "Multi"),
+                Map.entry("websiteUrl",     "https://multi.com"),
+                Map.entry("iconFile",       "icon.ico"),
+                Map.entry("modulesJson",    "[]"),
+                Map.entry("hasModules",     false),
+                Map.entry("moduleRequires", ""),
+                Map.entry("moduleSetups",   ""),
+                Map.entry("isWin",          false),
+                Map.entry("isMac",          false),
+                Map.entry("isLinux",        true),
+                Map.entry("linuxTarget",    "AppImage")
         );
 
         templateEngine.render("config.mustache",  ctx);

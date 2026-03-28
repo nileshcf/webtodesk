@@ -1,5 +1,5 @@
 {
-  "name": "{{projectName}}",
+  "name": "{{npmPackageName}}",
   "version": "{{currentVersion}}",
   "description": "Desktop app for {{appTitle}}",
   "main": "main.js",
@@ -12,12 +12,18 @@
     "electron-builder": "^26.0.12"
   },
   "build": {
-    "appId": "com.{{projectName}}.app",
+    "appId": "{{appId}}",
     "productName": "{{appTitle}}",
     "directories": { "output": "dist" },
     "files": ["main.js", "preload.js", "config.js"{{#hasModules}}, "modules/**"{{/hasModules}}],
-    "win": { "target": "nsis" },
-    "mac": { "category": "public.app-category.utilities" },
-    "linux": { "target": "AppImage" }
+    {{#isWin}}
+    "win": { "target": "nsis" }
+    {{/isWin}}
+    {{#isMac}}
+    "mac": { "category": "public.app-category.utilities" }
+    {{/isMac}}
+    {{#isLinux}}
+    "linux": { "target": "{{linuxTarget}}" }
+    {{/isLinux}}
   }
 }

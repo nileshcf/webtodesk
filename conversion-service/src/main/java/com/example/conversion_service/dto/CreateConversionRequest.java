@@ -24,5 +24,7 @@ public record CreateConversionRequest(
 
         String iconFile,
 
-        List<String> enabledModules
+        List<String> enabledModules,
+
+        String targetPlatform
 ) {}

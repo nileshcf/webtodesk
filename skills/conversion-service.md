@@ -12,7 +12,8 @@ description: >
   **Week 1 (Foundation + R2 + Local Builds) is COMPLETE as of 2026-03-27.**
   **Week 2 (Licensing + Build Queue + Frontend Components) is COMPLETE. All 57 tests passed.**
   **Week 3 (Template Engine + Module System + Build Metrics) is COMPLETE as of 2026-03-28. All 83 tests pass.**
-  Current week: Week 4.
+  **Week 4 (Toggleable Modules + Dev Build + Dashboard) is IN PROGRESS as of 2026-03-29. All 83 tests still pass.**
+  Current week: Week 4. Remaining: VersionUpgradeService, GitHub Actions CI, OpenAPI docs.
   Activates for: webtodesk, conversion service, electron app builder, url to desktop, desktop
   wrapper, electron template, build pipeline, conversion project, R2, cloudflare, artifact storage.
 stack: Java 17, Spring Boot 3.3.6, Spring Cloud 2023.0.4, MongoDB, Eureka, Lombok,
@@ -1827,3 +1828,353 @@ export function BuildProgress({ projectId, targetOS }) {
   );
 }
 ```
+
+---
+
+## 17. Session Learnings, Mistakes, and Best Practices (2026-03-29)
+
+### 17.1 Critical Mistakes Fixed
+
+#### 17.1.1 Build Failure Root Cause: SSE `ConcurrentModificationException`
+**Problem:** Builds appeared to fail with `Build failed for 'test-2': null` after the artifact was successfully uploaded to R2. The actual Electron build succeeded (`.AppImage` 113MB), but the SSE `emitProgress()` call during `uploadArtifact` threw a `ConcurrentModificationException` that bubbled up and caused `failBuild(project, null)`.
+
+**Root Cause:** `emitProgress()` iterated over `List<SseEmitter> projectEmitters` while clients could connect/disconnect, causing `ConcurrentModificationException`. The inner `try-catch` only handled per-emitter send failures, not the list modification exception itself.
+
+**Fix Applied:**
+```java
+private void emitProgress(String projectId, String progress, String message) {
+    try {
+        List<SseEmitter> projectEmitters = emitters.get(projectId);
+        if (projectEmitters == null || projectEmitters.isEmpty()) return;
+
+        // Snapshot to avoid ConcurrentModificationException if a client connects/drops mid-send
+        List<SseEmitter> snapshot = List.copyOf(projectEmitters);
+        List<SseEmitter> dead = new ArrayList<>();
+        for (SseEmitter emitter : snapshot) {
+            try {
+                emitter.send(SseEmitter.event()
+                        .name("progress")
+                        .data(Map.of("progress", progress, "message", message)));
+            } catch (Exception e) {
+                dead.add(emitter);
+            }
+        }
+        projectEmitters.removeAll(dead);
+    } catch (Exception ignored) {
+        log.debug("emitProgress swallowed exception for project {}: {}", projectId, ignored.getMessage());
+    }
+}
+```
+
+**Lesson:** Always guard async streaming endpoints with defensive copies and outer exception handling. A single broken pipe should never bring down a multi-minute build.
+
+#### 17.1.2 Missing Template Files — Build-Time Failures
+**Problem:** `Template main.mustache not found` caused immediate build failures even though the template path was correct in code.
+
+**Root Cause:** The `templates/electron/main.mustache` file was never created after the template engine refactor. Mustache templates are not auto-generated; they must be explicitly created.
+
+**Fix Applied:** Created `main.mustache` and `offline.mustache` with proper Mustache syntax:
+```mustache
+// main.mustache
+const { app, BrowserWindow } = require('electron');
+const path = require('path');
+
+{{{moduleRequires}}}
+
+function createWindow() {
+    const mainWindow = new BrowserWindow({
+        width: 1200,
+        height: 800,
+        webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false,
+        },
+    });
+
+    mainWindow.loadURL('{{{websiteUrl}}}');
+
+    // Module setup calls
+    {{{moduleSetups}}}
+}
+
+app.whenReady().then(createWindow);
+```
+
+**Lesson:** Template engines require actual template files. Always verify template existence after refactoring.
+
+#### 17.1.3 DTO Constructor Signature Drift
+**Problem:** Adding `targetPlatform` to `CreateConversionRequest` record broke 4 test files using the 5-arg constructor.
+
+**Root Cause:** Records generate constructors based on field order. Adding a field changes the signature.
+
+**Fix Applied:** Updated all test instantiations to include `null` for the new field:
+```java
+// Before
+new CreateConversionRequest("My App", "https://example.com", "My App", null, null);
+// After  
+new CreateConversionRequest("My App", "https://example.com", "My App", null, null, null);
+```
+
+**Lesson:** When evolving DTO records, always update dependent test files immediately to avoid CI failures.
+
+### 17.2 Architectural Improvements Made
+
+#### 17.2.1 Per-Project Build Target Selection
+**Before:** Global `WEBTODESK_BUILD_TARGET_PLATFORM` env var only.
+**After:** Per-project `targetPlatform` field stored in MongoDB, resolved with precedence:
+1. Project field (user choice in wizard)
+2. Env var override
+3. Auto-detect from server OS
+
+**Implementation:**
+```java
+private BuildTarget resolveBuildTarget(ConversionProject project) {
+    // 1. Per-project preference (set by user in wizard)
+    if (project != null && project.getTargetPlatform() != null && !project.getTargetPlatform().isBlank()) {
+        BuildTarget projectTarget = BuildTarget.fromAlias(project.getTargetPlatform().trim().toLowerCase(Locale.ROOT));
+        if (projectTarget != null) return projectTarget;
+    }
+    // 2. Env-var / application.yml override
+    String requested = targetPlatform == null ? "" : targetPlatform.trim().toLowerCase(Locale.ROOT);
+    if (!requested.isBlank() && !"auto".equals(requested)) {
+        BuildTarget explicitTarget = BuildTarget.fromAlias(requested);
+        if (explicitTarget != null) return explicitTarget;
+    }
+    // 3. Auto-detect from server OS (Linux in Docker → LINUX)
+    return isWindows() ? BuildTarget.WIN : BuildTarget.LINUX;
+}
+```
+
+**Lesson:** User preferences should override system defaults. Store per-project settings in the entity, not just in UI state.
+
+#### 17.2.2 Development Build Flag — Bypass All Restrictions
+**Problem:** Testing and development required license/tier bypasses.
+
+**Solution:** Added `DEVELOPMENT_BUILD=true` env var that:
+- Skips `licenseService.validateBuildRequest()` in `BuildService.triggerBuild()`
+- Passes `devMode=true` to `ModuleRegistry.resolveEnabledModules()` to bypass tier gating
+- Shows amber "DEV MODE" banner in wizard, unlocks all modules
+
+**Implementation:**
+```java
+// BuildService.java
+@Value("${webtodesk.build.development-build:false}")
+boolean developmentBuild;
+
+public void triggerBuild(String projectId) {
+    // License check — throws LicenseViolationException (→ 402) if quota exceeded
+    if (!developmentBuild) {
+        licenseService.validateBuildRequest(project);
+    } else {
+        log.warn("[DEV MODE] Skipping license validation for project '{}'", project.getProjectName());
+    }
+}
+
+// ModuleRegistry.java
+public List<String> resolveEnabledModules(List<String> requested, LicenseTier tier, boolean devMode) {
+    if (requested == null || requested.isEmpty()) return Collections.emptyList();
+    List<String> resolved = new ArrayList<>();
+    for (String key : requested) {
+        if (!REGISTRY.containsKey(key)) {
+            log.warn("Unknown module key '{}' — skipping", key);
+            continue;
+        }
+        if (!devMode && !isAvailable(key, tier)) {
+            log.warn("Module '{}' requires tier {} but project is on {} — skipping",
+                    key, REGISTRY.get(key).requiredTier(), tier);
+            continue;
+        }
+        resolved.add(key);
+    }
+    return resolved;
+}
+```
+
+**Lesson:** Development flags should be explicit, logged, and isolated from production logic.
+
+### 17.3 Frontend Best Practices
+
+#### 17.3.1 Dark Glass Theme Consistency
+**Problem:** Wizard used light theme colors (`text-gray-700`, `bg-white`) breaking the app's dark glass aesthetic.
+
+**Solution:** Replaced all colors with dark glass tokens:
+- Labels: `text-white/50 uppercase tracking-wider`
+- Inputs: `input-field` class (dark bg, white text, subtle borders)
+- Buttons: `btn-primary` / `btn-ghost` (rounded-full, proper contrast)
+- Cards: `bg-white/[0.03] border-white/[0.08]`
+- Active states: `bg-accent-blue/10 border-accent-blue/40`
+
+**Key Classes from `index.css`:**
+```css
+.input-field {
+  @apply w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10
+         text-white placeholder-white/30 outline-none
+         transition-all duration-300
+         focus:border-accent-blue/50 focus:bg-white/[0.07] focus:ring-1 focus:ring-accent-blue/30;
+}
+
+.btn-primary {
+  @apply px-6 py-3 rounded-full bg-white text-black font-semibold text-sm
+         transition-all duration-300 hover:bg-white/90 hover:scale-[1.02]
+         active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed;
+}
+
+.btn-ghost {
+  @apply px-6 py-3 rounded-full border border-white/20 text-white font-medium text-sm
+         transition-all duration-300 hover:bg-white/5 hover:border-white/30
+         active:scale-[0.98];
+}
+```
+
+**Lesson:** Maintain a design system with utility classes. Never hardcode colors; use opacity-based dark themes.
+
+#### 17.3.2 UX: Remove Ambiguous "Auto" Options
+**Problem:** OS selector included "Auto" causing user confusion about what would be built.
+
+**Solution:** Removed "Auto", defaulted to "Linux", showed only explicit options:
+- 🪟 Windows (.exe / .msi)
+- 🐧 Linux (.AppImage / .deb)
+
+**Lesson:** Users prefer explicit choices over auto-detection in critical settings.
+
+### 17.4 Testing & CI/CD Best Practices
+
+#### 17.4.1 Record Constructor Drift Detection
+**Mistake:** Adding fields to DTO records broke tests silently.
+
+**Prevention:** 
+- Always run tests immediately after DTO changes
+- Consider using `@Builder` annotations for records if frequent evolution is expected
+- Document field order in DTOs
+
+#### 17.4.2 MongoDB Index Planning
+**Improvement:** Added compound indexes for `build_records` collection based on query patterns:
+```java
+@CompoundIndexes({
+    @CompoundIndex(name = "user_completed", def = "{'userEmail': 1, 'completedAt': -1}"),
+    @CompoundIndex(name = "project_completed", def = "{'projectId': 1, 'completedAt': -1}"),
+    @CompoundIndex(name = "result_completed", def = "{'result': 1, 'completedAt': -1}")
+})
+```
+
+**Lesson:** Index on query patterns, not just individual fields. Time-series data needs compound indexes with descending time.
+
+### 17.5 Docker & Environment Best Practices
+
+#### 17.5.1 Build Environment Validation
+**Improvement:** Added `validateBuildEnvironment()` that fails fast before workspace creation:
+```java
+private void validateBuildEnvironment(ConversionProject project) throws IOException, InterruptedException {
+    String nodeVersion = getToolVersion("node", "--version");
+    if (nodeVersion == null) {
+        throw new IOException("Node.js not found in PATH. Cannot build Electron app.");
+    }
+    // Disk space check, npm version, etc.
+}
+```
+
+**Lesson:** Validate environment early; don't waste time on workspace setup if tools are missing.
+
+#### 17.5.2 Docker Build Caching
+**Observation:** Docker layers for Node.js/npm and Java dependencies cached well, but frontend rebuilds were still slow.
+
+**Recommendation:** Consider `.dockerignore` optimizations and separate frontend build stage if rebuild frequency increases.
+
+### 17.6 Error Handling Patterns
+
+#### 17.6.1 SSE Error Resilience
+**Pattern Applied:** Wrap all SSE operations in defensive copies:
+```java
+List<SseEmitter> snapshot = List.copyOf(projectEmitters); // Safe snapshot
+```
+
+**Lesson:** Concurrent collections need defensive copies during iteration.
+
+#### 17.6.2 Build Error Context
+**Improvement:** Enhanced error messages with tool versions and environment info:
+```java
+throw new IOException(
+    "Node.js not found in PATH. Cannot build Electron app. " +
+    "Ensure Node.js is installed in the build environment. " +
+    "Effective PATH: " + buildEnvironment().getOrDefault("PATH", "(not set)"));
+```
+
+**Lesson:** Error messages should include enough context for debugging.
+
+### 17.7 Module System Best Practices
+
+#### 17.7.1 Backward Compatibility
+**Pattern:** Added overloaded methods instead of changing signatures:
+```java
+// New overload with devMode
+public List<String> resolveEnabledModules(List<String> requested, LicenseTier tier, boolean devMode)
+
+// Existing method delegates (backward compatible)
+public List<String> resolveEnabledModules(List<String> requested, LicenseTier tier) {
+    return resolveEnabledModules(requested, tier, false);
+}
+```
+
+**Lesson:** Overloads are safer than signature changes for public APIs.
+
+#### 17.7.2 Module Setup Contracts
+**Standardized:** All modules now receive full `config` object, not just modules array:
+```javascript
+// In generated main.js
+module.setup(mainWindow, config); // config includes modules, websiteUrl, etc.
+```
+
+**Lesson:** Modules need full context for proper initialization.
+
+### 17.8 Security Considerations
+
+#### 17.8.1 Development Build Isolation
+**Implementation:** `DEVELOPMENT_BUILD` flag is environment-only, never exposed in API responses.
+
+**Lesson:** Development shortcuts should never leak to production APIs.
+
+#### 17.8.2 Input Validation
+**Maintained:** All DTO fields retain validation annotations even in dev mode.
+
+**Lesson:** Never disable validation, even in development.
+
+### 17.9 Performance Optimizations
+
+#### 17.9.1 Build Metrics Indexing
+**Applied:** Compound indexes for time-series queries reduce database load.
+
+#### 17.9.2 SSE Client Cleanup
+**Improved:** Proactive emitter cleanup prevents memory leaks.
+
+### 17.10 Future Improvements
+
+#### 17.10.1 Build Queue Prioritization
+**Idea:** Prioritize builds by user tier or project importance.
+
+#### 17.10.2 Template Hot-Reloading
+**Potential:** Watch template directory for changes without rebuild.
+
+#### 17.10.3 Module Versioning
+**Consider:** Version modules to support compatibility across app updates.
+
+---
+
+### 17.11 Quick Reference Checklist
+
+Before deploying conversion-service changes:
+
+- [ ] All Mustache templates exist in `templates/electron/`
+- [ ] DTO record constructors updated in tests
+- [ ] MongoDB indexes added for new query patterns
+- [ ] SSE `emitProgress` uses defensive copies
+- [ ] Development build flag documented
+- [ ] Frontend uses dark glass theme classes
+- [ ] Per-project settings stored in entity
+- [ ] Environment validation runs early
+- [ ] All 83 tests pass
+- [ ] Docker build succeeds
+- [ ] Manual build test completes
+
+---
+
+**Session Outcome:** All critical bugs fixed, UI theme unified, per-project OS selection implemented, development mode working, 83/83 tests passing, Docker container healthy.

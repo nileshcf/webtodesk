@@ -75,6 +75,14 @@ public class ModuleRegistry {
      * Logs a warning for each key that is unknown or tier-locked.
      */
     public List<String> resolveEnabledModules(List<String> requested, LicenseTier tier) {
+        return resolveEnabledModules(requested, tier, false);
+    }
+
+    /**
+     * Dev-mode overload — when {@code devMode} is true, tier gating is skipped entirely
+     * so all known module keys are resolved regardless of tier.
+     */
+    public List<String> resolveEnabledModules(List<String> requested, LicenseTier tier, boolean devMode) {
         if (requested == null || requested.isEmpty()) return Collections.emptyList();
         List<String> resolved = new ArrayList<>();
         for (String key : requested) {
@@ -82,8 +90,9 @@ public class ModuleRegistry {
                 log.warn("Unknown module key '{}' — skipping", key);
                 continue;
             }
-            if (!isAvailable(key, tier)) {
-                log.warn("Module '{}' requires tier {} but project is on {} — skipping", key, REGISTRY.get(key).requiredTier(), tier);
+            if (!devMode && !isAvailable(key, tier)) {
+                log.warn("Module '{}' requires tier {} but project is on {} — skipping",
+                        key, REGISTRY.get(key).requiredTier(), tier);
                 continue;
             }
             resolved.add(key);

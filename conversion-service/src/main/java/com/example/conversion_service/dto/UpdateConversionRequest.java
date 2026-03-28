@@ -23,5 +23,7 @@ public record UpdateConversionRequest(
         @Pattern(regexp = "^\\d+\\.\\d+\\.\\d+$", message = "Version must be in semver format (e.g. 1.0.0)")
         String currentVersion,
 
-        List<String> enabledModules
+        List<String> enabledModules,
+
+        String targetPlatform
 ) {}

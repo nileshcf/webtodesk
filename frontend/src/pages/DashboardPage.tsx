@@ -3,25 +3,29 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Globe, Monitor, Trash2, Download, Loader2,
   ExternalLink, X, AlertCircle, CheckCircle2, Sparkles, Rocket, Shield,
-  Package, FileDown
+  Package, FileDown, History
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { conversionApi } from '../services/api';
 import type { ConversionProject, ElectronConfig } from '../types';
+import ProjectWizard from '../components/ProjectWizard';
+import BuildDashboard from '../components/BuildDashboard';
 
 export default function DashboardPage() {
   const { user } = useAuth();
   const [projects, setProjects] = useState<ConversionProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingProject, setEditingProject] = useState<ConversionProject | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [generatedConfig, setGeneratedConfig] = useState<ElectronConfig | null>(null);
-  const [form, setForm] = useState({ projectName: '', websiteUrl: '', appTitle: '', iconFile: '' });
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
   const [buildingIds, setBuildingIds] = useState<Set<string>>(new Set());
   const [buildProgress, setBuildProgress] = useState<Record<string, string>>({});
   const [buildLog, setBuildLog] = useState<Record<string, string>>({});
   const [buildError, setBuildError] = useState<Record<string, string>>({});
+  const [expandedHistory, setExpandedHistory] = useState<Set<string>>(new Set());
   const eventSources = useRef<Record<string, AbortController>>({});
 
   const fetchProjects = useCallback(async () => {
@@ -37,27 +41,52 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleWizardSubmit = async (wizardData: {
+    projectName: string; websiteUrl: string; appTitle: string;
+    iconFile: string; enabledModules: string[]; targetPlatform: string;
+  }) => {
     setFormError('');
     setFormLoading(true);
     try {
       const created = await conversionApi.create({
-        projectName: form.projectName,
-        websiteUrl: form.websiteUrl,
-        appTitle: form.appTitle,
-        iconFile: form.iconFile || undefined,
+        projectName: wizardData.projectName,
+        websiteUrl: wizardData.websiteUrl,
+        appTitle: wizardData.appTitle,
+        iconFile: wizardData.iconFile || undefined,
+        enabledModules: wizardData.enabledModules.length > 0 ? wizardData.enabledModules : undefined,
+        targetPlatform: wizardData.targetPlatform || undefined,
       });
-      setForm({ projectName: '', websiteUrl: '', appTitle: '', iconFile: '' });
       setShowForm(false);
-      
-      // Optimistically update projects list to show the new card immediately
       setProjects(prev => [created, ...prev]);
-      
-      // Automatically trigger the build seamlessly
       handleBuild(created.id);
     } catch (err: any) {
       setFormError(err.response?.data?.message || 'Failed to create project');
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const handleUpdateSubmit = async (wizardData: {
+    projectName: string; websiteUrl: string; appTitle: string;
+    iconFile: string; enabledModules: string[]; targetPlatform: string;
+  }) => {
+    if (!editingProject) return;
+    setFormError('');
+    setFormLoading(true);
+    try {
+      const updated = await conversionApi.update(editingProject.id, {
+        projectName: wizardData.projectName,
+        websiteUrl: wizardData.websiteUrl,
+        appTitle: wizardData.appTitle,
+        iconFile: wizardData.iconFile || undefined,
+        enabledModules: wizardData.enabledModules.length > 0 ? wizardData.enabledModules : undefined,
+        targetPlatform: wizardData.targetPlatform || undefined,
+      });
+      setEditingProject(null);
+      fetchProjects();
+      handleBuild(updated.id);
+    } catch (err: any) {
+      setFormError(err.response?.data?.message || 'Failed to update project');
     } finally {
       setFormLoading(false);
     }
@@ -194,6 +223,7 @@ export default function DashboardPage() {
   const handleDelete = async (id: string) => {
     try {
       await conversionApi.remove(id);
+      setDeletingProjectId(null);
       fetchProjects();
     } catch {
       // handle error
@@ -232,9 +262,9 @@ export default function DashboardPage() {
             </h1>
             <p className="text-sm text-white/40">Manage your website-to-desktop conversions</p>
           </div>
-          <button onClick={() => setShowForm(!showForm)} className="btn-accent flex items-center gap-2">
-            {showForm ? <X size={16} /> : <Plus size={16} />}
-            {showForm ? 'Cancel' : 'New Conversion'}
+          <button onClick={() => { setShowForm(!showForm); setEditingProject(null); }} className="btn-accent flex items-center gap-2 shadow-lg shadow-accent-blue/20">
+            {showForm && !editingProject ? <X size={16} /> : <Plus size={16} />}
+            {showForm && !editingProject ? 'Cancel' : 'New Conversion'}
           </button>
         </motion.div>
 
@@ -251,7 +281,7 @@ export default function DashboardPage() {
               subtitle: 'Paste a site, get an app config.',
               icon: Rocket,
               accent: 'from-accent-blue/25 to-transparent',
-              onClick: () => setShowForm(true),
+              onClick: () => { setShowForm(true); setEditingProject(null); },
             },
             {
               title: 'Security presets',
@@ -290,78 +320,48 @@ export default function DashboardPage() {
           ))}
         </motion.div>
 
-        {/* Create Form */}
-        <AnimatePresence>
-          {showForm && (
+        {/* Create Form — wizard panel */}
+        <AnimatePresence mode="wait">
+          {(showForm || editingProject) && (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden mb-8"
+              key="wizard"
+              initial={{ opacity: 0, y: -12, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -12, scale: 0.98 }}
+              transition={{ duration: 0.2 }}
+              className="mb-8"
             >
-              <div className="glass-card p-6 sm:p-8">
-                <h2 className="text-lg font-semibold mb-6 flex items-center gap-2">
-                  <Globe size={18} className="text-accent-blue" /> Convert a Website
-                </h2>
-
+              <div className="glass-card overflow-hidden">
+                {/* Dark inner panel — wizard uses text-white/* classes throughout */}
+                <div className="rounded-xl m-1" style={{ minHeight: 540 }}>
+                  {formLoading ? (
+                    <div className="flex flex-col items-center justify-center h-64 gap-3">
+                      <Loader2 size={28} className="animate-spin text-indigo-600" />
+                      <p className="text-sm text-gray-500">Creating project…</p>
+                    </div>
+                  ) : (
+                    <ProjectWizard
+                      devMode={true}
+                      initialData={editingProject ? {
+                        projectName: editingProject.projectName,
+                        websiteUrl: editingProject.websiteUrl,
+                        appTitle: editingProject.appTitle,
+                        iconFile: editingProject.iconFile || '',
+                        enabledModules: editingProject.enabledModules || [],
+                        targetPlatform: (editingProject.targetPlatform as any) || 'auto',
+                      } : undefined}
+                      onSubmit={editingProject ? handleUpdateSubmit : handleWizardSubmit}
+                      onCancel={() => { setShowForm(false); setEditingProject(null); setFormError(''); }}
+                      submitLabel={editingProject ? "Update & Build" : "Create & Build"}
+                    />
+                  )}
+                </div>
                 {formError && (
-                  <div className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 mb-4">
-                    <AlertCircle size={16} className="text-red-400" />
-                    <p className="text-sm text-red-300">{formError}</p>
+                  <div className="flex items-center gap-2 px-4 pb-3">
+                    <AlertCircle size={14} className="text-red-400 flex-shrink-0" />
+                    <p className="text-xs text-red-300">{formError}</p>
                   </div>
                 )}
-
-                <form onSubmit={handleCreate} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="sm:col-span-2">
-                    <label className="text-xs text-white/40 mb-1.5 block">Website URL</label>
-                    <input
-                      type="url"
-                      value={form.websiteUrl}
-                      onChange={(e) => setForm((f) => ({ ...f, websiteUrl: e.target.value }))}
-                      placeholder="https://your-website.com"
-                      className="input-field"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-white/40 mb-1.5 block">App Title</label>
-                    <input
-                      type="text"
-                      value={form.appTitle}
-                      onChange={(e) => setForm((f) => ({ ...f, appTitle: e.target.value }))}
-                      placeholder="My Desktop App"
-                      className="input-field"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-white/40 mb-1.5 block">Project Name</label>
-                    <input
-                      type="text"
-                      value={form.projectName}
-                      onChange={(e) => setForm((f) => ({ ...f, projectName: e.target.value }))}
-                      placeholder="my-desktop-app"
-                      className="input-field"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-white/40 mb-1.5 block">Icon File (optional)</label>
-                    <input
-                      type="text"
-                      value={form.iconFile}
-                      onChange={(e) => setForm((f) => ({ ...f, iconFile: e.target.value }))}
-                      placeholder="icon.ico"
-                      className="input-field"
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <button type="submit" disabled={formLoading} className="btn-primary flex items-center gap-2 w-full justify-center">
-                      {formLoading ? <Loader2 size={16} className="animate-spin" /> : <Monitor size={16} />}
-                      {formLoading ? 'Creating...' : 'Create Conversion'}
-                    </button>
-                  </div>
-                </form>
               </div>
             </motion.div>
           )}
@@ -422,9 +422,9 @@ export default function DashboardPage() {
                     {project.status === 'READY' && project.downloadAvailable && (
                       <button
                         onClick={() => handleDownload(project)}
-                        className="btn-accent !py-2 !px-4 !text-xs flex items-center gap-1.5"
+                        className="btn-accent !py-2 !px-4 !text-xs flex items-center gap-1.5 shadow-md shadow-accent-blue/20"
                       >
-                        <FileDown size={13} /> Download .exe
+                        <FileDown size={13} /> Download
                       </button>
                     )}
                     {buildingIds.has(project.id) || project.status === 'BUILDING' ? (
@@ -448,19 +448,49 @@ export default function DashboardPage() {
                       </button>
                     ) : (
                       <button
-                        onClick={() => handleBuild(project.id)}
-                        className="btn-ghost !py-2 !px-4 !text-xs flex items-center gap-1.5"
+                        onClick={() => { setEditingProject(project); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                        className="btn-ghost !py-2 !px-4 !text-xs flex items-center gap-1.5 hover:bg-white/10"
                       >
-                        <Package size={13} /> Build .exe
+                        <Package size={13} /> Build
                       </button>
                     )}
 
                     <button
-                      onClick={() => handleDelete(project.id)}
-                      className="p-2 rounded-xl text-white/20 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                      onClick={() => setExpandedHistory(prev => {
+                        const next = new Set(prev);
+                        next.has(project.id) ? next.delete(project.id) : next.add(project.id);
+                        return next;
+                      })}
+                      className={`p-2 rounded-xl transition-all ${
+                        expandedHistory.has(project.id)
+                          ? 'bg-accent-blue/10 text-accent-blue'
+                          : 'text-white/20 hover:text-white/50 hover:bg-white/5'
+                      }`}
+                      title="Build history"
                     >
-                      <Trash2 size={16} />
+                      <History size={16} />
                     </button>
+                    
+                    {deletingProjectId === project.id ? (
+                      <div className="flex items-center gap-1 ml-1">
+                        <button
+                          onClick={() => setDeletingProjectId(null)}
+                          className="px-2 py-1.5 rounded-lg text-xs font-medium text-white/50 hover:bg-white/10 transition-colors"
+                        >Cancel</button>
+                        <button
+                          onClick={() => handleDelete(project.id)}
+                          className="px-2 py-1.5 rounded-lg text-xs font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
+                        >Confirm</button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setDeletingProjectId(project.id)}
+                        className="p-2 rounded-xl text-white/20 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                        title="Delete project"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                   </div>
                 </div>
                 {/* Build error message */}
@@ -468,6 +498,28 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-2 mt-3 p-2.5 rounded-lg bg-red-500/10 border border-red-500/20">
                     <AlertCircle size={14} className="text-red-400 flex-shrink-0" />
                     <p className="text-xs text-red-300">{buildError[project.id] || project.buildError}</p>
+                  </div>
+                )}
+                {/* Build history panel */}
+                {expandedHistory.has(project.id) && (
+                  <div className="mt-4 pt-4 border-t border-white/[0.04]">
+                    <BuildDashboard 
+                      projectId={project.id} 
+                      projectName={project.projectName} 
+                      onRebuild={(record) => {
+                        setEditingProject({
+                          ...project,
+                          enabledModules: record.enabledModules || [],
+                          targetPlatform: record.buildTarget as any || 'win'
+                        });
+                        setExpandedHistory(prev => {
+                          const next = new Set(prev);
+                          next.delete(project.id);
+                          return next;
+                        });
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                    />
                   </div>
                 )}
               </motion.div>

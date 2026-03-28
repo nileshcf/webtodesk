@@ -74,7 +74,7 @@ public class LicenseController {
     @GetMapping("/usage")
     public ResponseEntity<LicenseUsageStatsResponse> getUsageStats(
             @RequestHeader("X-User-Email") String userEmail,
-            @RequestParam(defaultValue = "current") String period) {
+            @RequestParam(value = "period", defaultValue = "current") String period) {
         return ResponseEntity.ok(licenseService.getUsageStats(userEmail));
     }
 

@@ -6,6 +6,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -17,6 +19,11 @@ import java.util.List;
  * One BuildRecord is saved per triggerBuild() call, regardless of outcome.
  */
 @Document(collection = "build_records")
+@CompoundIndexes({
+    @CompoundIndex(name = "user_completed", def = "{'userEmail': 1, 'completedAt': -1}"),
+    @CompoundIndex(name = "project_completed", def = "{'projectId': 1, 'completedAt': -1}"),
+    @CompoundIndex(name = "result_completed", def = "{'result': 1, 'completedAt': -1}")
+})
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
