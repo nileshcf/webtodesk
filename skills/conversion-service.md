@@ -55,7 +55,7 @@ On every invocation the agent MUST:
 | **Entity** | `ConversionProject.java` | **Hardened** | 14 fields incl. `githubRunId`, `r2Key`, `buildArtifactPath`, `buildError`. `ConversionStatus` enum (DRAFT/READY/BUILDING/FAILED). MongoDB `@Document` |
 | **Repository** | `ConversionRepository.java` | MVP | `MongoRepository`, single custom query `findByCreatedByOrderByCreatedAtDesc` |
 | **Service** | `ConversionService.java` | **Hardened** | CRUD + `generateElectronProject()`. Uses `ProjectNotFoundException`. |
-| **Service** | `BuildService.java` | **Week 1** | Local Git cloning, inserting generated Electron config files, running `npm install`, `npx electron-builder --win`, SSE log streaming, and uploading `.exe` to R2 |
+| **Service** | `BuildService.java` | **Week 1+** | Local workspace build, OS-aware `npm`/`npx` invocation (`*.cmd` on Windows, native binaries on Linux/Docker), target platform resolution (`webtodesk.build.target-platform` with `auto` fallback), SSE log streaming, and installer upload to R2 |
 | **Service** | `R2StorageService.java` | **Week 1** | Upload file/stream, delete, exists, getPublicUrl — uses AWS S3 SDK against R2 |
 | **Controller** | `ConversionController.java` | **Hardened** | CRUD + generate + build trigger (SSE stream) + build status + download redirect |
 | **Health** | `HealthController.java` | **Week 1** | `GET /conversions/health` |
@@ -152,6 +152,7 @@ webtodesk.r2.bucket: ${R2_BUCKET:webtodesk-builds}
 webtodesk.r2.public-url: ${R2_PUBLIC_URL:https://pub-1b61d73b19424844a83d743c392ddea5.r2.dev}
 webtodesk.r2.endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
 build.workspace.dir: ${BUILD_WORKSPACE_DIR:../workspaces}
+webtodesk.build.target-platform: ${WEBTODESK_BUILD_TARGET_PLATFORM:auto}
 build.repo.url: ${BUILD_REPO_URL:https://github.com/thecheesybit/web2desk-public-release.git}
 eureka.client.service-url.defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
 ```
@@ -457,6 +458,7 @@ R2 cloud storage, local build orchestration using Node.js & Electron Builder, SS
 | Frontend sends to `/conversions/...` directly | Frontend sends to `/conversion/conversions/...` — gateway strips prefix |
 | Using `@PathVariable` without explicit name | Always `@PathVariable("id")` |
 | `npm install` instead of `npm ci` in CI | `npm ci` for deterministic builds |
+| Hardcoding `cmd /c` or forcing `--win` in build steps | Resolve command/target by OS (`auto` or explicit `webtodesk.build.target-platform`) |
 | Streaming large artifacts through Spring | Use R2 redirect (302) |
 
 ---
