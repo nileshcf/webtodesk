@@ -16,6 +16,8 @@ import java.nio.file.*;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Slf4j
@@ -39,11 +41,12 @@ public class BuildService {
 
     /**
      * Triggers a LOCAL build for the Electron app.
-     * 1. Clone the webtodesk repo into a temp workspace
+     * 0. Validate build environment (node/npm present, disk space)
+     * 1. Create temp workspace
      * 2. Write generated Electron config files
      * 3. Run npm install
-     * 4. Run electron-builder --win
-     * 5. Upload the .exe artifact to R2
+     * 4. Run electron-builder for the resolved target platform
+     * 5. Upload the installer artifact to R2
      * 6. Stream progress via SSE throughout
      */
     @Async("buildExecutor")
@@ -63,6 +66,9 @@ public class BuildService {
         Path workspace = null;
 
         try {
+            // 0. Validate build environment before touching disk
+            validateBuildEnvironment(project);
+
             // 1. Create workspace
             workspace = createWorkspace(projectId);
 
@@ -72,10 +78,10 @@ public class BuildService {
             // 3. npm install
             runNpmInstall(project, workspace);
 
-            // 4. electron-builder for the selected target platform
+            // 4. electron-builder for the resolved target platform
             runElectronBuilder(project, workspace);
 
-            // 5. Find the built .exe and upload to R2
+            // 5. Find the installer artifact and upload to R2
             uploadArtifact(project, workspace);
 
         } catch (InterruptedException e) {
@@ -224,6 +230,84 @@ public class BuildService {
         log.info("Build artifact uploaded to R2 for '{}': {}", project.getProjectName(), publicUrl);
     }
 
+    // ─── Build Environment Helpers ──────────────────────
+
+    private void validateBuildEnvironment(ConversionProject project) throws IOException, InterruptedException {
+        updateProgress(project, "VALIDATING_ENV", "Checking build environment...");
+
+        String nodeVersion = getToolVersion("node", "--version");
+        if (nodeVersion == null) {
+            throw new IOException(
+                    "Node.js not found in PATH. Cannot build Electron app. " +
+                    "Ensure Node.js is installed in the build environment. " +
+                    "Effective PATH: " + buildEnvironment().getOrDefault("PATH", "(not set)"));
+        }
+        log.info("[env] node {}", nodeVersion);
+
+        String npmVersion = getToolVersion(resolveExecutable("npm"), "--version");
+        if (npmVersion == null) {
+            throw new IOException("npm not found in PATH. Ensure npm is installed in the build environment.");
+        }
+        log.info("[env] npm  {}", npmVersion);
+
+        File outputDir = new File(buildOutputDir);
+        outputDir.mkdirs();
+        long freeSpaceMB = outputDir.getFreeSpace() / (1024L * 1024);
+        if (freeSpaceMB < 512) {
+            throw new IOException(
+                    "Insufficient disk space: " + freeSpaceMB + " MB free in " + buildOutputDir +
+                    ". Electron builds require at least 512 MB.");
+        }
+        log.info("[env] os='{}' target={} freeSpace={}MB outputDir={}",
+                System.getProperty("os.name"), resolveBuildTarget().cliValue, freeSpaceMB, buildOutputDir);
+    }
+
+    private Map<String, String> buildEnvironment() {
+        Map<String, String> env = new HashMap<>(System.getenv());
+
+        if (!isWindows()) {
+            String currentPath = env.getOrDefault("PATH", "");
+            for (String nodePath : List.of("/usr/local/bin", "/usr/bin", "/bin")) {
+                if (!currentPath.contains(nodePath)) {
+                    currentPath = nodePath + File.pathSeparator + currentPath;
+                }
+            }
+            env.put("PATH", currentPath);
+        }
+
+        env.computeIfAbsent("HOME", k -> System.getProperty("user.home", "/tmp"));
+
+        String electronCache = env.getOrDefault("ELECTRON_CACHE",
+                System.getProperty("java.io.tmpdir") + "/electron-cache");
+        env.put("ELECTRON_CACHE", electronCache);
+        new File(electronCache).mkdirs();
+
+        env.put("CI", "true");
+        env.put("ADBLOCK", "true");
+        return env;
+    }
+
+    private String getToolVersion(String tool, String... args) {
+        try {
+            List<String> cmd = new ArrayList<>();
+            cmd.add(tool);
+            cmd.addAll(Arrays.asList(args));
+            ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
+            pb.environment().putAll(buildEnvironment());
+            Process p = pb.start();
+            String out;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                out = reader.lines().collect(Collectors.joining(" ")).trim();
+            }
+            boolean done = p.waitFor(10, TimeUnit.SECONDS);
+            if (!done) { p.destroyForcibly(); }
+            return out.isBlank() ? null : out;
+        } catch (Exception e) {
+            log.debug("Tool probe '{}' unavailable: {}", tool, e.getMessage());
+            return null;
+        }
+    }
+
     // ─── Process Execution ───────────────────────────────
 
     /**
@@ -237,17 +321,22 @@ public class BuildService {
                 .directory(workingDir.toFile())
                 .redirectErrorStream(true); // merge stderr into stdout
 
-        // Inherit PATH so node/npm/git are found
-        pb.environment().putAll(System.getenv());
+        // Augment environment with correct PATH, HOME, ELECTRON_CACHE, CI flag
+        // NOTE: Do NOT clear() the environment — Alpine's glib/library loader
+        // relies on inherited env vars that get wiped by clear().
+        // buildEnvironment() already starts from System.getenv() and overlays build-specific vars.
+        pb.environment().putAll(buildEnvironment());
 
         Process process = pb.start();
 
-        // Stream output lines to SSE in real-time
+        // Stream stdout/stderr to SSE in real-time; buffer tail lines for error context
+        List<String> outputLines = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
             String line;
             int lineCount = 0;
             while ((line = reader.readLine()) != null) {
                 log.debug("[build:{}] {}", projectId, line);
+                outputLines.add(line);
                 lineCount++;
                 // Send every 5th line to SSE to avoid flooding the client
                 if (lineCount % 5 == 0) {
@@ -257,8 +346,19 @@ public class BuildService {
             }
         }
 
-        int exitCode = process.waitFor();
+        boolean finished = process.waitFor(30, TimeUnit.MINUTES);
+        if (!finished) {
+            process.destroyForcibly();
+            throw new IOException("Build process timed out after 30 minutes: " + String.join(" ", command));
+        }
+
+        int exitCode = process.exitValue();
         log.info("Process exited with code {} for {}", exitCode, String.join(" ", command));
+        if (exitCode != 0) {
+            int start = Math.max(0, outputLines.size() - 20);
+            String tail = String.join("\n", outputLines.subList(start, outputLines.size()));
+            log.error("Process failed (exit {}). Last output:\n{}", exitCode, tail);
+        }
         return exitCode;
     }
 

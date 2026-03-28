@@ -36,10 +36,17 @@ RUN mvn -B -DskipTests clean package -pl common,user-service,api-gateway,discove
 # ---------- FINAL IMAGE ----------
 FROM eclipse-temurin:17-jre-alpine
 
-# Install nginx + required tools
-RUN apk add --no-cache nginx bash gettext \
+# Install nginx, Node.js (for conversion-service Electron builds) and required tools
+RUN apk add --no-cache nginx bash gettext nodejs npm python3 build-base glib gcompat \
     && mkdir -p /run/nginx \
-    && mkdir -p /etc/nginx/conf.d
+    && mkdir -p /etc/nginx/conf.d \
+    && mkdir -p /tmp/electron-cache /tmp/npm-cache
+
+# Cache dirs and flags for electron-builder inside Docker
+ENV CI=true \
+    ELECTRON_CACHE=/tmp/electron-cache \
+    npm_config_cache=/tmp/npm-cache \
+    ADBLOCK=true
 
 WORKDIR /app
 
