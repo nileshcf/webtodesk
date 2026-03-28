@@ -63,6 +63,7 @@ public class GatewaySecurityConfig {
         config.setAllowedOrigins(List.of(
                 "http://localhost:3000",
                 "http://localhost:5173",
+                "http://localhost:7860",
                 "https://webtodesk.onrender.com"
         ));
         config.setAllowedOriginPatterns(List.of(

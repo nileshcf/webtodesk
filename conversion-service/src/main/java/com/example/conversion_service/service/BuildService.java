@@ -16,6 +16,8 @@ import java.nio.file.*;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Slf4j
@@ -29,6 +31,9 @@ public class BuildService {
     @Value("${webtodesk.build.output-dir:${java.io.tmpdir}/webtodesk-builds}")
     private String buildOutputDir;
 
+    @Value("${webtodesk.build.target-platform:auto}")
+    private String targetPlatform;
+
     // SSE emitters per projectId — multiple clients can subscribe
     private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
@@ -36,11 +41,12 @@ public class BuildService {
 
     /**
      * Triggers a LOCAL build for the Electron app.
-     * 1. Clone the webtodesk repo into a temp workspace
+     * 0. Validate build environment (node/npm present, disk space)
+     * 1. Create temp workspace
      * 2. Write generated Electron config files
      * 3. Run npm install
-     * 4. Run electron-builder --win
-     * 5. Upload the .exe artifact to R2
+     * 4. Run electron-builder for the resolved target platform
+     * 5. Upload the installer artifact to R2
      * 6. Stream progress via SSE throughout
      */
     @Async("buildExecutor")
@@ -60,6 +66,9 @@ public class BuildService {
         Path workspace = null;
 
         try {
+            // 0. Validate build environment before touching disk
+            validateBuildEnvironment(project);
+
             // 1. Create workspace
             workspace = createWorkspace(projectId);
 
@@ -69,10 +78,10 @@ public class BuildService {
             // 3. npm install
             runNpmInstall(project, workspace);
 
-            // 4. electron-builder --win
+            // 4. electron-builder for the resolved target platform
             runElectronBuilder(project, workspace);
 
-            // 5. Find the built .exe and upload to R2
+            // 5. Find the installer artifact and upload to R2
             uploadArtifact(project, workspace);
 
         } catch (InterruptedException e) {
@@ -161,9 +170,7 @@ public class BuildService {
     private void runNpmInstall(ConversionProject project, Path workspace) throws IOException, InterruptedException {
         updateProgress(project, "INSTALLING", "Running npm install...");
 
-        int exitCode = runProcess(project.getId(), workspace, new String[]{
-                "cmd", "/c", "npm", "install", "--no-audit", "--no-fund"
-        });
+        int exitCode = runProcess(project.getId(), workspace, command("npm", "install", "--no-audit", "--no-fund"));
 
         if (exitCode != 0) {
             throw new IOException("npm install failed with exit code " + exitCode);
@@ -173,11 +180,11 @@ public class BuildService {
     }
 
     private void runElectronBuilder(ConversionProject project, Path workspace) throws IOException, InterruptedException {
-        updateProgress(project, "BUILDING", "Running electron-builder (this may take a few minutes)...");
+        BuildTarget buildTarget = resolveBuildTarget();
+        updateProgress(project, "BUILDING", "Running electron-builder for " + buildTarget.cliValue + " target (this may take a few minutes)...");
 
-        int exitCode = runProcess(project.getId(), workspace, new String[]{
-                "cmd", "/c", "npx", "electron-builder", "--win", "--publish=never"
-        });
+        int exitCode = runProcess(project.getId(), workspace,
+                command("npx", "electron-builder", "--" + buildTarget.cliValue, "--publish=never"));
 
         if (exitCode != 0) {
             throw new IOException("electron-builder failed with exit code " + exitCode);
@@ -187,48 +194,29 @@ public class BuildService {
     }
 
     private void uploadArtifact(ConversionProject project, Path workspace) throws IOException {
-        updateProgress(project, "FINDING_ARTIFACT", "Looking for built .exe...");
+        BuildTarget buildTarget = resolveBuildTarget();
+        updateProgress(project, "FINDING_ARTIFACT", "Looking for built installer artifact...");
 
         Path distDir = workspace.resolve("dist");
         if (!Files.isDirectory(distDir)) {
             throw new IOException("dist directory not found after build — electron-builder may have failed silently");
         }
 
-        // Look for NSIS installer .exe first, then any .exe
-        Path exeFile = null;
-        try (Stream<Path> walk = Files.walk(distDir)) {
-            exeFile = walk
-                    .filter(p -> {
-                        String name = p.getFileName().toString().toLowerCase();
-                        return name.endsWith(".exe") && (name.contains("setup") || name.contains("install"));
-                    })
-                    .findFirst()
-                    .orElse(null);
+        Path installerArtifact = findInstallerArtifact(distDir, buildTarget);
+        if (installerArtifact == null) {
+            throw new IOException("No installable artifact found in dist/ directory for target: " + buildTarget.cliValue);
         }
 
-        if (exeFile == null) {
-            try (Stream<Path> walk = Files.walk(distDir)) {
-                exeFile = walk
-                        .filter(p -> p.toString().toLowerCase().endsWith(".exe"))
-                        .findFirst()
-                        .orElse(null);
-            }
-        }
-
-        if (exeFile == null) {
-            throw new IOException("No .exe artifact found in dist/ directory");
-        }
-
-        log.info("Found artifact: {} ({}KB)", exeFile.getFileName(), Files.size(exeFile) / 1024);
+        log.info("Found artifact: {} ({}KB)", installerArtifact.getFileName(), Files.size(installerArtifact) / 1024);
         updateProgress(project, "UPLOADING_R2", "Uploading to cloud storage...");
 
         // Upload to R2
         String r2Key = String.format("builds/%s/%s/%s",
                 project.getCreatedBy().replaceAll("[^a-zA-Z0-9@._-]", "_"),
                 project.getId(),
-                exeFile.getFileName().toString());
+                installerArtifact.getFileName().toString());
 
-        String publicUrl = r2StorageService.uploadFile(exeFile, r2Key, "application/octet-stream");
+        String publicUrl = r2StorageService.uploadFile(installerArtifact, r2Key, "application/octet-stream");
 
         // Update project
         project.setStatus(ConversionStatus.READY);
@@ -240,6 +228,84 @@ public class BuildService {
 
         emitProgress(project.getId(), "COMPLETE", "Build complete! Download ready.");
         log.info("Build artifact uploaded to R2 for '{}': {}", project.getProjectName(), publicUrl);
+    }
+
+    // ─── Build Environment Helpers ──────────────────────
+
+    private void validateBuildEnvironment(ConversionProject project) throws IOException, InterruptedException {
+        updateProgress(project, "VALIDATING_ENV", "Checking build environment...");
+
+        String nodeVersion = getToolVersion("node", "--version");
+        if (nodeVersion == null) {
+            throw new IOException(
+                    "Node.js not found in PATH. Cannot build Electron app. " +
+                    "Ensure Node.js is installed in the build environment. " +
+                    "Effective PATH: " + buildEnvironment().getOrDefault("PATH", "(not set)"));
+        }
+        log.info("[env] node {}", nodeVersion);
+
+        String npmVersion = getToolVersion(resolveExecutable("npm"), "--version");
+        if (npmVersion == null) {
+            throw new IOException("npm not found in PATH. Ensure npm is installed in the build environment.");
+        }
+        log.info("[env] npm  {}", npmVersion);
+
+        File outputDir = new File(buildOutputDir);
+        outputDir.mkdirs();
+        long freeSpaceMB = outputDir.getFreeSpace() / (1024L * 1024);
+        if (freeSpaceMB < 512) {
+            throw new IOException(
+                    "Insufficient disk space: " + freeSpaceMB + " MB free in " + buildOutputDir +
+                    ". Electron builds require at least 512 MB.");
+        }
+        log.info("[env] os='{}' target={} freeSpace={}MB outputDir={}",
+                System.getProperty("os.name"), resolveBuildTarget().cliValue, freeSpaceMB, buildOutputDir);
+    }
+
+    private Map<String, String> buildEnvironment() {
+        Map<String, String> env = new HashMap<>(System.getenv());
+
+        if (!isWindows()) {
+            String currentPath = env.getOrDefault("PATH", "");
+            for (String nodePath : List.of("/usr/local/bin", "/usr/bin", "/bin")) {
+                if (!currentPath.contains(nodePath)) {
+                    currentPath = nodePath + File.pathSeparator + currentPath;
+                }
+            }
+            env.put("PATH", currentPath);
+        }
+
+        env.computeIfAbsent("HOME", k -> System.getProperty("user.home", "/tmp"));
+
+        String electronCache = env.getOrDefault("ELECTRON_CACHE",
+                System.getProperty("java.io.tmpdir") + "/electron-cache");
+        env.put("ELECTRON_CACHE", electronCache);
+        new File(electronCache).mkdirs();
+
+        env.put("CI", "true");
+        env.put("ADBLOCK", "true");
+        return env;
+    }
+
+    private String getToolVersion(String tool, String... args) {
+        try {
+            List<String> cmd = new ArrayList<>();
+            cmd.add(tool);
+            cmd.addAll(Arrays.asList(args));
+            ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
+            pb.environment().putAll(buildEnvironment());
+            Process p = pb.start();
+            String out;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                out = reader.lines().collect(Collectors.joining(" ")).trim();
+            }
+            boolean done = p.waitFor(10, TimeUnit.SECONDS);
+            if (!done) { p.destroyForcibly(); }
+            return out.isBlank() ? null : out;
+        } catch (Exception e) {
+            log.debug("Tool probe '{}' unavailable: {}", tool, e.getMessage());
+            return null;
+        }
     }
 
     // ─── Process Execution ───────────────────────────────
@@ -255,17 +321,22 @@ public class BuildService {
                 .directory(workingDir.toFile())
                 .redirectErrorStream(true); // merge stderr into stdout
 
-        // Inherit PATH so node/npm/git are found
-        pb.environment().putAll(System.getenv());
+        // Augment environment with correct PATH, HOME, ELECTRON_CACHE, CI flag
+        // NOTE: Do NOT clear() the environment — Alpine's glib/library loader
+        // relies on inherited env vars that get wiped by clear().
+        // buildEnvironment() already starts from System.getenv() and overlays build-specific vars.
+        pb.environment().putAll(buildEnvironment());
 
         Process process = pb.start();
 
-        // Stream output lines to SSE in real-time
+        // Stream stdout/stderr to SSE in real-time; buffer tail lines for error context
+        List<String> outputLines = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
             String line;
             int lineCount = 0;
             while ((line = reader.readLine()) != null) {
                 log.debug("[build:{}] {}", projectId, line);
+                outputLines.add(line);
                 lineCount++;
                 // Send every 5th line to SSE to avoid flooding the client
                 if (lineCount % 5 == 0) {
@@ -275,9 +346,99 @@ public class BuildService {
             }
         }
 
-        int exitCode = process.waitFor();
+        boolean finished = process.waitFor(30, TimeUnit.MINUTES);
+        if (!finished) {
+            process.destroyForcibly();
+            throw new IOException("Build process timed out after 30 minutes: " + String.join(" ", command));
+        }
+
+        int exitCode = process.exitValue();
         log.info("Process exited with code {} for {}", exitCode, String.join(" ", command));
+        if (exitCode != 0) {
+            int start = Math.max(0, outputLines.size() - 20);
+            String tail = String.join("\n", outputLines.subList(start, outputLines.size()));
+            log.error("Process failed (exit {}). Last output:\n{}", exitCode, tail);
+        }
         return exitCode;
+    }
+
+    private String[] command(String executable, String... args) {
+        List<String> command = new ArrayList<>();
+        command.add(resolveExecutable(executable));
+        command.addAll(Arrays.asList(args));
+        return command.toArray(new String[0]);
+    }
+
+    private String resolveExecutable(String executable) {
+        return isWindows() ? executable + ".cmd" : executable;
+    }
+
+    private BuildTarget resolveBuildTarget() {
+        String requested = targetPlatform == null ? "" : targetPlatform.trim().toLowerCase(Locale.ROOT);
+        if (!requested.isBlank() && !"auto".equals(requested)) {
+            BuildTarget explicitTarget = BuildTarget.fromAlias(requested);
+            if (explicitTarget != null) {
+                return explicitTarget;
+            }
+            log.warn("Unknown build target platform '{}', falling back to auto detection", targetPlatform);
+        }
+        return isWindows() ? BuildTarget.WIN : BuildTarget.LINUX;
+    }
+
+    private boolean isWindows() {
+        String osName = System.getProperty("os.name", "");
+        return osName.toLowerCase(Locale.ROOT).contains("win");
+    }
+
+    private Path findInstallerArtifact(Path distDir, BuildTarget buildTarget) throws IOException {
+        for (String extension : buildTarget.preferredExtensions) {
+            Path artifact = findArtifactByExtension(distDir, extension, true);
+            if (artifact != null) {
+                return artifact;
+            }
+            artifact = findArtifactByExtension(distDir, extension, false);
+            if (artifact != null) {
+                return artifact;
+            }
+        }
+
+        for (String extension : BuildTarget.GENERIC_INSTALLER_EXTENSIONS) {
+            Path artifact = findArtifactByExtension(distDir, extension, true);
+            if (artifact != null) {
+                return artifact;
+            }
+        }
+
+        for (String extension : BuildTarget.GENERIC_INSTALLER_EXTENSIONS) {
+            Path artifact = findArtifactByExtension(distDir, extension, false);
+            if (artifact != null) {
+                return artifact;
+            }
+        }
+
+        return null;
+    }
+
+    private Path findArtifactByExtension(Path distDir, String extension, boolean preferInstallerNames) throws IOException {
+        try (Stream<Path> walk = Files.walk(distDir)) {
+            return walk
+                    .filter(Files::isRegularFile)
+                    .filter(path -> {
+                        String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
+                        if (!name.endsWith(extension)) {
+                            return false;
+                        }
+                        if (name.endsWith(".blockmap") || name.endsWith(".yml") || name.endsWith(".yaml")) {
+                            return false;
+                        }
+                        if (!preferInstallerNames) {
+                            return true;
+                        }
+                        return name.contains("setup") || name.contains("install") || name.contains("installer");
+                    })
+                    .findFirst()
+                    .orElse(null);
+        }
     }
 
     // ─── Workspace Cleanup ───────────────────────────────
@@ -573,5 +734,31 @@ public class BuildService {
                 project.getProjectName(),
                 project.getAppTitle()
         );
+    }
+
+    private enum BuildTarget {
+        WIN("win", List.of(".exe", ".msi")),
+        LINUX("linux", List.of(".appimage", ".deb", ".rpm")),
+        MAC("mac", List.of(".dmg", ".zip"));
+
+        private static final List<String> GENERIC_INSTALLER_EXTENSIONS =
+                List.of(".exe", ".msi", ".appimage", ".deb", ".rpm", ".dmg", ".zip");
+
+        private final String cliValue;
+        private final List<String> preferredExtensions;
+
+        BuildTarget(String cliValue, List<String> preferredExtensions) {
+            this.cliValue = cliValue;
+            this.preferredExtensions = preferredExtensions;
+        }
+
+        private static BuildTarget fromAlias(String value) {
+            return switch (value) {
+                case "win", "windows", "win32" -> WIN;
+                case "linux", "docker" -> LINUX;
+                case "mac", "darwin", "macos", "osx" -> MAC;
+                default -> null;
+            };
+        }
     }
 }
