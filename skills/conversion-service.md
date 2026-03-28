@@ -55,7 +55,7 @@ On every invocation the agent MUST:
 | **Entity** | `ConversionProject.java` | **Hardened** | 14 fields incl. `githubRunId`, `r2Key`, `buildArtifactPath`, `buildError`. `ConversionStatus` enum (DRAFT/READY/BUILDING/FAILED). MongoDB `@Document` |
 | **Repository** | `ConversionRepository.java` | MVP | `MongoRepository`, single custom query `findByCreatedByOrderByCreatedAtDesc` |
 | **Service** | `ConversionService.java` | **Hardened** | CRUD + `generateElectronProject()`. Uses `ProjectNotFoundException`. |
-| **Service** | `BuildService.java` | **Week 1+** | Local workspace build, OS-aware `npm`/`npx` invocation (`*.cmd` on Windows, native binaries on Linux/Docker), target platform resolution (`webtodesk.build.target-platform` with `auto` fallback), SSE log streaming, and installer upload to R2 |
+| **Service** | `BuildService.java` | **Week 1+** | Local workspace build. Key methods: `triggerBuild` (async orchestrator), `validateBuildEnvironment` (pre-flight: node/npm probe + disk check), `buildEnvironment` (augmented PATH/HOME/ELECTRON_CACHE map), `getToolVersion` (safe 10s tool probe), `runProcess` (30-min timeout + last-20-line tail log on failure), `resolveBuildTarget` (auto/win/linux/mac via `BuildTarget` enum), `resolveExecutable` (`.cmd` on Windows, bare on Linux). Artifact discovery is extension-aware (.exe/.msi/.AppImage/.deb/.rpm/.dmg/.zip). |
 | **Service** | `R2StorageService.java` | **Week 1** | Upload file/stream, delete, exists, getPublicUrl — uses AWS S3 SDK against R2 |
 | **Controller** | `ConversionController.java` | **Hardened** | CRUD + generate + build trigger (SSE stream) + build status + download redirect |
 | **Health** | `HealthController.java` | **Week 1** | `GET /conversions/health` |
@@ -113,37 +113,48 @@ Browser (localhost:5173)
                                       X-User-Id, X-User-Email, X-User-Roles
 ```
 
-### 1.5 Build & Download Flow (R2 + GitHub Actions)
+### 1.5 Build & Download Flow (Local ProcessBuilder → R2)
 
 ```
-Frontend ──POST /build──→ Conversion Service
+Frontend ──POST /conversion/conversions/{id}/build──→ API Gateway ──→ Conversion Service
                               │
-                              ├─ 1. Generate Electron files (config.js, main.js, preload.js, package.json)
-                              ├─ 2. Push files to GitHub via Git API (blob → tree → commit → ref update)
-                              ├─ 3. Dispatch GitHub Actions workflow (workflow_dispatch)
-                              └─ Return 202 BUILDING
-                              
-Frontend ──polls /build/status every 10s──→ Conversion Service → {status, downloadUrl}
+                              └─ Return 202 BUILDING immediately (@Async)
 
-GitHub Actions (electron-build.yml) ──on completion──→
-  POST /conversions/{id}/build/callback {projectId, runId, success, errorMessage}
-                              │
-                              ├─ Download artifact zip from GitHub Actions run
-                              ├─ Extract .exe from zip
-                              ├─ Upload to R2: builds/{email}/{projectId}/{filename}
-                              └─ Update project: status=READY, buildArtifactPath=R2 URL
+Conversion Service (async thread — buildExecutor)
+  Step 0  VALIDATING_ENV   → probe node/npm versions, check ≥512MB disk
+  Step 1  PREPARING        → create temp workspace in BUILD_OUTPUT_DIR
+  Step 2  WRITING_FILES    → write config.js, main.js, preload.js, package.json
+  Step 3  INSTALLING       → npm install --no-audit --no-fund
+  Step 4  BUILDING         → npx electron-builder --{win|linux|mac} --publish=never
+  Step 5  FINDING_ARTIFACT → walk dist/ for installer by target extensions
+  Step 6  UPLOADING_R2     → upload to R2 key: builds/{email}/{id}/{filename}
+          → set status=READY, buildArtifactPath=R2 public URL
+  Cleanup → delete temp workspace
 
-Frontend → downloads directly from R2 public URL (no Spring proxy)
+Frontend ──SSE /build/stream──→ receives progress events (VALIDATING_ENV → COMPLETE)
+Frontend ──GET /build/status──→ polls BuildStatusResponse {status, downloadUrl}
+Frontend ──downloads directly from R2 public URL──→ (no Spring proxy)
+
+On failure at any step → status=FAILED, buildError=message, SSE FAILED event
+```
+
+**OS / Platform Resolution (`BuildTarget` enum):**
+```
+WEBTODESK_BUILD_TARGET_PLATFORM=auto  →  Windows host → --win (.exe/.msi)
+                                          Linux/Docker → --linux (.AppImage/.deb/.rpm)
+auto can be overridden: win | linux | mac | windows | darwin | docker
 ```
 
 ### 1.6 Secrets & Environment Variables
 
 > **CRITICAL:** Never hardcode secrets in code. These are documented for agent awareness only.
 
-**conversion-service (`application.yml`):**
+**conversion-service (`application.yml`) — actual keys as of 2026-03-28:**
 ```yaml
-server.port: ${SERVER_PORT:8082}
-spring.data.mongodb.uri: ${MONGODB_URI:mongodb+srv://...}
+server.port: 8082
+spring.data.mongodb.uri: ${MONGODB_URI}                             # required, no default
+webtodesk.build.output-dir: ${BUILD_OUTPUT_DIR:/tmp/webtodesk-builds}
+webtodesk.build.target-platform: ${WEBTODESK_BUILD_TARGET_PLATFORM:auto}
 webtodesk.r2.enabled: ${R2_ENABLED:true}
 webtodesk.r2.account-id: ${R2_ACCOUNT_ID:b34ccabf01d35919541bffb8a9ad0384}
 webtodesk.r2.access-key-id: ${R2_ACCESS_KEY_ID:...}
@@ -151,10 +162,15 @@ webtodesk.r2.secret-access-key: ${R2_SECRET_ACCESS_KEY:...}
 webtodesk.r2.bucket: ${R2_BUCKET:webtodesk-builds}
 webtodesk.r2.public-url: ${R2_PUBLIC_URL:https://pub-1b61d73b19424844a83d743c392ddea5.r2.dev}
 webtodesk.r2.endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
-build.workspace.dir: ${BUILD_WORKSPACE_DIR:../workspaces}
-webtodesk.build.target-platform: ${WEBTODESK_BUILD_TARGET_PLATFORM:auto}
-build.repo.url: ${BUILD_REPO_URL:https://github.com/thecheesybit/web2desk-public-release.git}
-eureka.client.service-url.defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+eureka.client.service-url.defaultZone: http://localhost:8761/eureka/
+```
+
+**Docker ENV vars (set in root `Dockerfile` final stage):**
+```
+CI=true                          # suppresses interactive npm prompts
+ELECTRON_CACHE=/tmp/electron-cache   # electron binary cache across builds
+npm_config_cache=/tmp/npm-cache       # npm package cache across builds
+ADBLOCK=true                    # suppresses electron-builder ad analytics
 ```
 
 **R2 Account Details:**
@@ -262,7 +278,7 @@ conversion-service/
 │   │   └── ConversionRepository.java
 │   └── service/
 │       ├── ConversionService.java          # CRUD + generateElectronProject
-│       ├── BuildService.java               # GitHub dispatch, callback, R2 upload, file gen
+│       ├── BuildService.java               # Local build orchestrator: env validation, OS-aware npm/npx, BuildTarget enum, 30-min timeout, SSE streaming, R2 upload
 │       └── R2StorageService.java           # Upload/delete/exists against R2
 ├── src/main/resources/
 │   ├── application.yml                     # Full config: R2, GitHub, callback, MongoDB, Eureka
@@ -333,7 +349,9 @@ webtodesk-builds/
   builds/
     {user_email}/
       {project_id}/
-        {project_name}-setup.exe         ← Windows NSIS installer
+        {project_name}-Setup.exe         ← Windows NSIS installer  (BuildTarget.WIN)
+        {project_name}.AppImage          ← Linux AppImage           (BuildTarget.LINUX)
+        {project_name}.dmg               ← macOS DMG                (BuildTarget.MAC)
 ```
 
 ---
@@ -390,8 +408,20 @@ R2 cloud storage, local build orchestration using Node.js & Electron Builder, SS
 - [x] Frontend features: R2 direct download link, @microsoft/fetch-event-source for robust SSE
 - [x] Tested & working E2E Pipeline (Frontend → Backend builds `.exe` locally → Uploads to R2 → Downloads from UI)
 
+### CROSS-PLATFORM + DOCKER FIX (2026-03-28) ✅
+- [x] Removed `cmd /c` hardcoding — `resolveExecutable()` appends `.cmd` only on Windows
+- [x] `BuildTarget` enum: WIN/LINUX/MAC with preferred installer extensions per platform
+- [x] `resolveBuildTarget()`: auto-detects OS, falls back to LINUX in Docker/container
+- [x] `validateBuildEnvironment()`: pre-flight check for node/npm + 512MB disk space
+- [x] `buildEnvironment()`: augments PATH with `/usr/local/bin:/usr/bin:/bin`, sets HOME, ELECTRON_CACHE, CI=true
+- [x] `getToolVersion()`: safe 10s tool probe with try-with-resources (no resource leak)
+- [x] `runProcess()`: uses `buildEnvironment()`, 30-min process timeout, captures last 20 lines on failure
+- [x] `application.yml`: added `webtodesk.build.target-platform` config key
+- [x] Root `Dockerfile`: added `nodejs npm python3 build-base` to Alpine apk; pre-created `/tmp/electron-cache` and `/tmp/npm-cache`; set `CI`, `ELECTRON_CACHE`, `npm_config_cache`, `ADBLOCK` ENV vars
+- [x] Artifact discovery: extension-aware for .exe/.msi/.AppImage/.deb/.rpm/.dmg/.zip
+
 ### NOT YET DEPLOYED
-(None - complete and functioning locally.)
+(All changes above local — deploy to Docker/Hugging Face Space to test end-to-end.)
 ```
 
 ### WEEK 2 — TEMPLATE ENGINE + MODULE SYSTEM (Days 8–14)
@@ -439,9 +469,9 @@ R2 cloud storage, local build orchestration using Node.js & Electron Builder, SS
 - No `eval()` in generated main process code
 
 ### Build Pipeline
-- Webhook validates caller before processing
 - Failed builds set FAILED status with error — never silently drop
-- Build timeout: if no callback in 30 min, mark FAILED (future)
+- Build process timeout: 30 min enforced via `process.waitFor(30, TimeUnit.MINUTES)` → `destroyForcibly()` → IOException → FAILED status
+- Pre-flight env check runs before workspace creation — fail fast on missing Node.js or low disk space
 
 ---
 
@@ -459,6 +489,9 @@ R2 cloud storage, local build orchestration using Node.js & Electron Builder, SS
 | Using `@PathVariable` without explicit name | Always `@PathVariable("id")` |
 | `npm install` instead of `npm ci` in CI | `npm ci` for deterministic builds |
 | Hardcoding `cmd /c` or forcing `--win` in build steps | Resolve command/target by OS (`auto` or explicit `webtodesk.build.target-platform`) |
+| Skipping `nodejs npm` in final Docker image | Final stage is `eclipse-temurin:17-jre-alpine` — it has NO Node.js. Add to `apk add` in `Dockerfile` |
+| Using raw `System.getenv()` in ProcessBuilder | Use `buildEnvironment()` which augments PATH, sets HOME, ELECTRON_CACHE, CI |
+| Not validating build env before spawning processes | Always call `validateBuildEnvironment()` first — catches missing npm before touching disk |
 | Streaming large artifacts through Spring | Use R2 redirect (302) |
 
 ---
@@ -467,17 +500,60 @@ R2 cloud storage, local build orchestration using Node.js & Electron Builder, SS
 
 | Problem | Fix |
 |---------|-----|
+| `Cannot run program "npm"` error=2 No such file | Node.js not installed in final Docker image. Add `nodejs npm python3 build-base` to `apk add` in root `Dockerfile` |
+| `npm` found locally but not in Docker | PATH seen by JVM in Docker differs from shell PATH. `buildEnvironment()` prepends `/usr/local/bin:/usr/bin:/bin` to fix |
+| Build fails with no useful error message | Check logs for last 20 lines — `runProcess()` logs them at ERROR level on non-zero exit |
+| Build silently hangs | 30-min process timeout will fire, destroy process, and emit FAILED status. Check Docker memory limits if builds die early |
+| `ELECTRON_CACHE` permission denied | `/tmp/electron-cache` must exist and be writable. Created at Docker build time via `mkdir -p` |
+| AppImage build fails in Docker | May need FUSE kernel module. Fallback: set `WEBTODESK_BUILD_TARGET_PLATFORM=linux` and ensure `appimagetool` can run. Check Docker `--privileged` flag if on self-hosted runner |
 | `SignatureDoesNotMatch` on R2 upload | Check `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` — no spaces |
 | `NoSuchBucket` error | Bucket must be exactly `webtodesk-builds` |
 | R2 URL returns 403 | Enable public access on bucket in Cloudflare dashboard |
-| GitHub Actions not triggered | Check PAT has `workflow` + `repo` scope |
-| Callback not reaching Spring Boot | `CALLBACK_URL` must be publicly reachable. Use ngrok for local testing. |
-| `.exe` not found in artifact zip | Check extraction logic in `BuildService.downloadGitHubArtifact()` |
 | Stale Java classes | Always `mvn clean compile` before `spring-boot:run` |
-| Port 8082 conflict | `Get-Process -Name java | Stop-Process -Force` |
+| Port 8082 conflict | `Get-Process -Name java \| Stop-Process -Force` |
 
 ---
 
-*WebToDesk Conversion Service Skill — v3.1 — 2026-03-27*
-*Week 1 COMPLETE (code & E2E).*
-*Stack: Spring Boot 3.3.6 + MongoDB + Eureka + AWS S3 SDK + Cloudflare R2 + Local Node/Electron builds + React 19/Vite 6.*
+---
+
+## 12. SESSION LEARNINGS (2026-03-28 — Docker + Cross-Platform Build Fix)
+
+### Problem That Was Solved
+
+`Cannot run program "npm" (in directory "/tmp/webtodesk-builds/build-..."):
+error=2, No such file or directory`
+
+Triggered by: frontend hitting `POST /conversion/conversions/{id}/build` in Docker deployment.
+
+### Root Causes (in order of impact)
+
+1. **No Node.js in Docker image** — `eclipse-temurin:17-jre-alpine` is JRE only. `npm` binary simply didn't exist.
+2. **`cmd /c` hardcoded** — original `runNpmInstall`/`runElectronBuilder` used `new String[]{"cmd", "/c", "npm", ...}` which is Windows-cmd-only and fails immediately on Linux.
+3. **No pre-flight check** — build went straight to workspace creation, so the failure wasn't actionable.
+4. **`System.getenv()` passed raw** — JVM's inherited PATH inside Docker may not include `/usr/local/bin` or `/usr/bin`, hiding tools that ARE installed.
+5. **No process timeout** — a hung npm download or electron-builder step would block the async thread forever.
+6. **No error tail capture** — failed builds showed only "exit code 1" with zero context.
+
+### Fixes Applied
+
+| Fix | File |
+|-----|------|
+| Add `nodejs npm python3 build-base` to `apk add` | `Dockerfile` (root) |
+| Set `CI`, `ELECTRON_CACHE`, `npm_config_cache`, `ADBLOCK` ENV | `Dockerfile` (root) |
+| `BuildTarget` enum (WIN/LINUX/MAC) + `resolveBuildTarget()` | `BuildService.java` |
+| `resolveExecutable()` — `.cmd` on Windows, bare on Linux | `BuildService.java` |
+| `validateBuildEnvironment()` — probe node/npm, check disk | `BuildService.java` |
+| `buildEnvironment()` — augmented PATH + HOME + ELECTRON_CACHE | `BuildService.java` |
+| `getToolVersion()` — safe 10s probe, try-with-resources | `BuildService.java` |
+| `runProcess()` — 30-min timeout, tail output on failure | `BuildService.java` |
+| `webtodesk.build.target-platform` config key | `application.yml` |
+
+### Key Principle
+
+> The final Docker image is the runtime for ALL services in the container. Every tool that any service needs to spawn as a subprocess (node, npm, npx) **must be installed at the image level** — not assumed from the developer's local machine.
+
+---
+
+*WebToDesk Conversion Service Skill — v3.2 — 2026-03-28*
+*Week 1 COMPLETE + Docker/Cross-Platform Build Fix applied.*
+*Stack: Spring Boot 3.3.6 + MongoDB + Eureka + AWS S3 SDK + Cloudflare R2 + Local Node/Electron builds + React 19/Vite 6 + Docker (Alpine + Node.js).*
