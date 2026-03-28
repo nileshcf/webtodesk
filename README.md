@@ -24,20 +24,26 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 - **Website-to-Desktop Conversion** — Paste any URL and generate a ready-to-build Electron project
 - **Server-Side .exe Building** — Full local execution of `npm install` and `electron-builder` to generate `.exe` files and stream real-time logs via SSE
 - **Cloud Object Storage** — Automatically uploads generated artifacts to Cloudflare R2 for secure, scalable distribution
+- **Licensing System** — Four-tier licensing model (Trial/Starter/Pro/Lifetime) with build limits and expiry management
+- **OS-Specific Builds** — Cross-platform builds for Windows (.exe/.msi), Linux (.AppImage/.deb/.rpm), and macOS (.dmg/.zip)
+- **Priority Queue Routing** — Tier-based build queue management with normal and priority executors
 - **Screenshot & Recording Protection** — OS-level content protection with visual deterrent overlay
 - **DevTools Blocking** — Prevents end-users from inspecting or modifying the wrapped app
-- **Cross-Platform Builds** — Generated projects support Windows (.exe/NSIS), macOS (.dmg), and Linux (AppImage)
+- **Version Upgrade System** — Automatic version detection and upgrade with license persistence
+- **License Expiry Enforcement** — Runtime license validation with blocking expiry screen
+- **Feature Module System** — Modular architecture with tier-based feature availability
 - **User Authentication** — JWT-based auth with access/refresh token rotation and Redis-backed blacklisting
 - **User Profile Management** — Update username, display name, phone, and avatar
-- **Project Dashboard** — Create, list, update, delete, and generate conversion projects
-- **Version Management** — Track and update version numbers per project
+- **Project Dashboard** — Multi-step wizard with tier selection, OS configuration, and feature toggles
+- **Real-time Build Monitoring** — SSE-based build progress tracking with queue status
 - **Custom Branding** — Set app title, project name, and custom icon per conversion
 - **Service Discovery** — Eureka-based service registry for automatic microservice routing
 - **API Gateway** — Centralized routing, JWT validation, CORS, and header forwarding
+- **Frontend Integration** — Complete React frontend with TypeScript types and custom hooks
 
 ### Planned
 
-- ⚠️ **Subscription & Billing** — Stripe/Razorpay integration with plan tiers and usage limits
+- ⚠️ **Subscription & Billing** — Stripe/Razorpay integration with plan tiers and usage limits (backend implemented, frontend integration in progress)
 - ⚠️ **Email Verification** — Field exists but flow is not implemented
 - ⚠️ **Password Reset** — Endpoint references exist but no implementation
 - ⚠️ **Admin Panel** — Role enum exists (ROLE_ADMIN) but no admin UI or endpoints
@@ -54,13 +60,15 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 | **Frontend**   | React 19, TypeScript, Vite 6, TailwindCSS 3, Framer Motion, Axios |
 | **API Gateway**| Spring Cloud Gateway, Spring Security (WebFlux), Eureka Client    |
 | **User Service** | Spring Boot 3.3.6, Spring Data JPA, Spring Security, Redis      |
-| **Conversion Service** | Spring Boot 3.3.6, Spring Data MongoDB, Validation        |
+| **Conversion Service** | Spring Boot 3.3.6, Spring Data MongoDB, Validation, Licensing |
 | **Discovery**  | Spring Cloud Netflix Eureka Server                                |
 | **Auth**       | JWT (jjwt 0.12.3), BCrypt, Redis token blacklisting              |
 | **Databases**  | PostgreSQL (users), MongoDB (conversions), Redis (token blacklist) |
 | **Build**      | Maven multi-module, Vite                                          |
 | **Containers** | Docker (multi-stage builds), Docker Compose                       |
 | **Language**   | Java 17, TypeScript 5.7                                           |
+| **Licensing**  | Tier-based system (Trial/Starter/Pro/Lifetime) with build limits |
+| **Build Queue** | Priority queue system with OS-specific routing                  |
 
 ---
 
@@ -218,7 +226,26 @@ See [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) for full production deployment 
 
 ## Subscription & Billing Model
 
-> ⚠️ **Not yet implemented.** See [`docs/SUBSCRIPTION_AND_BILLING.md`](./docs/SUBSCRIPTION_AND_BILLING.md) for the planned billing architecture and [`docs/IMPROVEMENTS.md`](./docs/IMPROVEMENTS.md) for the implementation roadmap.
+**✅ Implemented (Backend + Frontend Integration)**
+
+WebToDesk now features a comprehensive four-tier licensing system:
+
+| Tier | Price | Duration | Build Limits | Features |
+|------|--------|-----------|--------------|----------|
+| **Trial** | Free | 30 days | 4 builds total (2 apps × 1 update) | Basic features, normal queue |
+| **Starter** | $9/mo | 1 year | 120 builds (10/month) | Priority queue, advanced features |
+| **Pro** | $29/mo | 5 years | 3,000 builds (50/month) | All features, priority support |
+| **Lifetime** | $299 | Unlimited | Unlimited (fair use) | All features, lifetime updates |
+
+**Key Features:**
+- **OS-specific builds** for Windows, Linux, and macOS
+- **Priority queue routing** for paid tiers
+- **License expiry enforcement** with blocking screen
+- **Automatic version upgrades** with license persistence
+- **Real-time build monitoring** with SSE updates
+- **Feature module system** with tier-based availability
+
+See [`skills/conversion-service.md`](./skills/conversion-service.md) for complete technical implementation details and [`skills/FEATURES.md`](./skills/FEATURES.md) for feature specifications.
 
 ---
 
@@ -249,6 +276,11 @@ This project is proprietary software. All rights reserved.
 
 ## Related Documentation
 
+### Core Documentation
+- [skills/FEATURES.md](./skills/FEATURES.md) — **Complete feature specifications and licensing system**
+- [skills/conversion-service.md](./skills/conversion-service.md) — **Technical implementation details and architecture**
+
+### Legacy Documentation
 - [ARCHITECTURE.md](./docs/ARCHITECTURE.md) — System architecture with Mermaid diagrams
 - [FILE_STRUCTURE.md](./docs/FILE_STRUCTURE.md) — Annotated file tree
 - [DB_SCHEMA.md](./docs/DB_SCHEMA.md) — Database schema documentation
@@ -256,3 +288,9 @@ This project is proprietary software. All rights reserved.
 - [SUBSCRIPTION_AND_BILLING.md](./docs/SUBSCRIPTION_AND_BILLING.md) — Billing model documentation
 - [DEPLOYMENT.md](./docs/DEPLOYMENT.md) — Production deployment guide
 - [IMPROVEMENTS.md](./docs/IMPROVEMENTS.md) — Prioritized improvement recommendations
+
+### Frontend Integration
+- **TypeScript Types**: `frontend/src/types/license.ts`, `frontend/src/types/build.ts`, `frontend/src/types/modules.ts`, `frontend/src/types/upgrade.ts`
+- **API Services**: `frontend/src/services/licenseApi.ts`, `frontend/src/services/buildApi.ts`, `frontend/src/services/versionApi.ts`
+- **Custom Hooks**: `frontend/src/hooks/useLicense.ts`, `frontend/src/hooks/useBuildQueue.ts`
+- **Component Architecture**: Multi-step wizard, license management, build queue monitoring
