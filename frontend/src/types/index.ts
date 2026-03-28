@@ -7,9 +7,9 @@ export interface User {
 
 export interface AuthTokens {
   accessToken: string;
-  refreshToken: string;
+  refreshToken?: string;
   tokenType: string;
-  expiresIn: number;
+  tokenExpiryInSeconds: number;
 }
 
 export interface LoginRequest {
