@@ -4,7 +4,6 @@
 
 **/node_modules
 **/dist
-**/target
 
 frontend/.vite
 

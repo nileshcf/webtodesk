@@ -2287,3 +2287,39 @@ private String generatePreloadJs(FeatureConfig config) {
     return sb.toString();
 }
 ```
+
+---
+
+## Deployment & Configuration
+
+### CORS Localhost Pattern Fix
+
+**Issue:** When running the monolith Docker container on port 8090, browser gets 403 Forbidden because `GatewaySecurityConfig` only allows specific localhost origins.
+
+**Root Cause:** Browser sends `Origin: http://localhost:8090` but config only had `http://localhost:7860` in allowed origins list.
+
+**Solution:** Replace static origins with wildcard pattern to match any localhost port:
+
+```java
+// GatewaySecurityConfig.java - corsConfigurationSource()
+config.setAllowedOriginPatterns(List.of(
+    "http://localhost:[*]",  // Matches any localhost port (3000, 5173, 7860, 8090, etc.)
+    "https://*.onrender.com",
+    "https://*.hf.space",
+    "https://*.static.hf.space"
+));
+```
+
+**Impact:** 
+- ✅ Local development works on any port without CORS errors
+- ✅ Production deployments still properly restricted
+- ✅ Frontend can successfully authenticate via `/user/auth/login`
+
+**Verification:**
+```bash
+# Preflight should return 204 with proper CORS headers
+curl -X OPTIONS http://localhost:8090/user/auth/login \
+  -H "Origin: http://localhost:8090" \
+  -H "Access-Control-Request-Method: POST" \
+  -H "Access-Control-Request-Headers: Content-Type"
+```

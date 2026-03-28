@@ -3,8 +3,8 @@ version: '3.8'
 services:
   discovery-service:
     build:
-      context: .
-      dockerfile: discovery-service/Dockerfile
+      context: discovery-service
+      dockerfile: Dockerfile
     container_name: discovery-service
     ports:
       - "8761:8761"
@@ -43,8 +43,8 @@ services:
 
   conversion-service:
     build:
-      context: .
-      dockerfile: conversion-service/Dockerfile
+      context: conversion-service
+      dockerfile: Dockerfile
     container_name: conversion-service
     ports:
       - "8082:8082"

@@ -8,6 +8,8 @@ import type {
   TargetOS,
   FileType 
 } from '../types/build';
+import { BuildPriority } from '../types/build';
+import { LicenseTier } from '../types/license';
 
 export function useBuildQueue() {
   const [activeBuilds, setActiveBuilds] = useState<Map<string, BuildStatusResponse>>(new Map());
@@ -144,19 +146,27 @@ export function useBuildQueue() {
         projectId,
         buildFlags: {
           targetOS,
-          priority: priority ? 'PRIORITY' : 'NORMAL',
+          priority: priority ? BuildPriority.PRIORITY : BuildPriority.NORMAL,
           fileType,
           crossPlatform: false,
-          osFileMappings: {}
+          osFileMappings: {
+            WINDOWS: fileType,
+            LINUX: fileType,
+            MACOS: fileType
+          }
         },
         featureConfig: {
-          tier: 'TRIAL', // This should come from license context
+          tier: LicenseTier.TRIAL, // This should come from license context
           buildFlags: {
             targetOS,
-            priority: priority ? 'PRIORITY' : 'NORMAL',
+            priority: priority ? BuildPriority.PRIORITY : BuildPriority.NORMAL,
             fileType,
             crossPlatform: false,
-            osFileMappings: {}
+            osFileMappings: {
+              WINDOWS: fileType,
+              LINUX: fileType,
+              MACOS: fileType
+            }
           },
           modules: {}
         }

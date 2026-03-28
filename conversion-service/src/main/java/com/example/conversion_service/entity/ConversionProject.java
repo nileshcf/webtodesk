@@ -43,6 +43,20 @@ public class ConversionProject {
     private String buildProgress;     // Granular progress: DISPATCHING, QUEUED, IN_PROGRESS, DOWNLOADING_ARTIFACT, UPLOADING_R2
     private Instant buildStartedAt;   // When the build was triggered (for stale detection)
 
+    // ── Licensing fields (nullable — existing documents stay valid) ──
+    @Builder.Default
+    private LicenseTier tier = LicenseTier.TRIAL;
+
+    private Instant licenseExpiresAt; // null = never expires (LIFETIME)
+
+    @Builder.Default
+    private Integer buildCount = 0;   // total builds triggered for this project
+
+    @Builder.Default
+    private Integer maxBuilds = 4;    // quota based on tier (TRIAL=4, STARTER=120, PRO=3000, LIFETIME=unlimited)
+
+    private String licenseId;         // UUID assigned at project creation
+
     @CreatedDate
     private Instant createdAt;
 
@@ -51,5 +65,9 @@ public class ConversionProject {
 
     public enum ConversionStatus {
         DRAFT, READY, BUILDING, FAILED
+    }
+
+    public enum LicenseTier {
+        TRIAL, STARTER, PRO, LIFETIME
     }
 }

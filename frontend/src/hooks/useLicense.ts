@@ -3,9 +3,9 @@ import { licenseApi } from '../services/licenseApi';
 import type { 
   LicenseInfo, 
   LicenseDashboard, 
-  LicenseValidationResponse,
-  LicenseTier 
+  LicenseValidationResponse
 } from '../types/license';
+import { LicenseTier } from '../types/license';
 
 export function useLicense() {
   const [currentLicense, setCurrentLicense] = useState<LicenseInfo | null>(null);

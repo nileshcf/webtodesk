@@ -36,11 +36,16 @@ export interface BuildConfigForm {
   priorityBuild: boolean;
 }
 
+import type { FeatureConfig } from './modules';
+
 export interface BuildRequest {
   projectId: string;
   buildFlags: BuildFlags;
   featureConfig: FeatureConfig;
 }
+
+// Re-export for consumers
+export type { FeatureConfig };
 
 export interface BuildResult {
   success: boolean;

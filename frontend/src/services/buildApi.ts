@@ -50,16 +50,12 @@ export const buildApi = {
       ? `${BUILD_BASE}/progress/${projectId}?targetOS=${targetOS}`
       : `${BUILD_BASE}/progress/${projectId}`;
     
-    return fetchEventSource(url, {
-      headers: { Authorization: `Bearer ${getAccessToken()}` }
-    });
+    return new EventSource(url);
   },
 
   // Subscribe to cross-platform build progress
   subscribeToCrossPlatformProgress(projectId: string): EventSource {
-    return fetchEventSource(`${BUILD_BASE}/cross-platform/progress/${projectId}`, {
-      headers: { Authorization: `Bearer ${getAccessToken()}` }
-    });
+    return new EventSource(`${BUILD_BASE}/cross-platform/progress/${projectId}`);
   },
 
   // Get build metrics

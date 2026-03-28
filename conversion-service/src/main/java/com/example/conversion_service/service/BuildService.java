@@ -27,6 +27,8 @@ public class BuildService {
 
     private final ConversionRepository repository;
     private final R2StorageService r2StorageService;
+    private final LicenseService licenseService;
+    private final BuildQueueService buildQueueService;
 
     @Value("${webtodesk.build.output-dir:${java.io.tmpdir}/webtodesk-builds}")
     private String buildOutputDir;
@@ -54,6 +56,9 @@ public class BuildService {
         ConversionProject project = repository.findById(projectId)
                 .orElseThrow(() -> new ProjectNotFoundException(projectId));
 
+        // License check — throws LicenseViolationException (→ 402) if quota exceeded
+        licenseService.validateBuildRequest(project);
+
         project.setStatus(ConversionStatus.BUILDING);
         project.setBuildProgress("PREPARING");
         project.setBuildStartedAt(Instant.now());
@@ -62,6 +67,9 @@ public class BuildService {
         project.setR2Key(null);
         repository.save(project);
         emitProgress(projectId, "PREPARING", "Preparing build workspace...");
+
+        buildQueueService.recordBuildStarted(projectId,
+                project.getTier() != null ? project.getTier() : com.example.conversion_service.entity.ConversionProject.LicenseTier.TRIAL);
 
         Path workspace = null;
 
@@ -91,10 +99,12 @@ public class BuildService {
             log.error("Build failed for '{}': {}", project.getProjectName(), e.getMessage(), e);
             failBuild(project, e.getMessage());
         } finally {
-            // 6. Cleanup workspace
+            // 6. Cleanup workspace and release queue slot
             if (workspace != null) {
                 cleanupWorkspace(workspace);
             }
+            buildQueueService.recordBuildFinished(projectId,
+                    project.getTier() != null ? project.getTier() : com.example.conversion_service.entity.ConversionProject.LicenseTier.TRIAL);
         }
     }
 
@@ -218,12 +228,13 @@ public class BuildService {
 
         String publicUrl = r2StorageService.uploadFile(installerArtifact, r2Key, "application/octet-stream");
 
-        // Update project
+        // Update project and increment build quota counter
         project.setStatus(ConversionStatus.READY);
         project.setBuildProgress("COMPLETE");
         project.setBuildArtifactPath(publicUrl);
         project.setR2Key(r2Key);
         project.setBuildError(null);
+        project.setBuildCount(project.getBuildCount() != null ? project.getBuildCount() + 1 : 1);
         repository.save(project);
 
         emitProgress(project.getId(), "COMPLETE", "Build complete! Download ready.");

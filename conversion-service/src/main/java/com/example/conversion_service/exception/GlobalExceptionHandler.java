@@ -25,6 +25,13 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.of(ex.getMessage(), getPath(request)));
     }
 
+    @ExceptionHandler(LicenseViolationException.class)
+    public ResponseEntity<ErrorResponse> handleLicenseViolation(LicenseViolationException ex, WebRequest request) {
+        log.warn("License violation at {}: {}", getPath(request), ex.getMessage());
+        return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
+                .body(ErrorResponse.of(ex.getMessage(), getPath(request)));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex, WebRequest request) {
         Map<String, String> fieldErrors = new HashMap<>();
