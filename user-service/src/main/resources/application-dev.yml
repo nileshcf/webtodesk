@@ -1,9 +1,15 @@
 spring:
   datasource:
-    url: jdbc:postgresql://ep-wispy-grass-ahm5qrep-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require
-    username: neondb_owner
-    password: npg_GJ1reSBh3NgU
+    url: ${USER_SERVICE_DB_URL:jdbc:postgresql://localhost:5432/webtodesk}
+    username: ${USER_SERVICE_DB_USERNAME:postgres}
+    password: ${USER_SERVICE_DB_PASSWORD:secret}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 8000
+      validation-timeout: 3000
+      initialization-fail-timeout: 10000
+      maximum-pool-size: 5
+      minimum-idle: 1
 
   jpa:
     hibernate:
@@ -16,4 +22,5 @@ spring:
 
   data:
     redis:
-      url: rediss://default:AVjTAAIncDIxNmUzODE3NzVmMWM0YWJiODAwOTZjMDI0NDY3YjlkYnAyMjI3Mzk@alive-titmouse-22739.upstash.io:6379
+      url: ${USER_SERVICE_REDIS_URL:redis://localhost:6379}
+      timeout: 3s

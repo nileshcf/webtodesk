@@ -1,3 +1,14 @@
+---
+title: WebToDesk
+emoji: 🖥️
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: Convert any website into a premium desktop application
+---
+
 # WebToDesk
 
 **Convert any website into a premium desktop application — in seconds.**
@@ -226,7 +237,7 @@ See [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) for full production deployment 
 - **Backend**: Follow standard Spring Boot conventions; use Lombok; use Java records for DTOs
 - **Frontend**: Functional components with hooks; TailwindCSS for styling; TypeScript strict mode
 - **Git**: Conventional commits (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`)
-- **Branches**: `main` (production), `develop` (integration), `feature/*`, `fix/*`
+- **Branches**: `development` (production), `develop` (integration), `feature/*`, `fix/*`
 
 ---
 
