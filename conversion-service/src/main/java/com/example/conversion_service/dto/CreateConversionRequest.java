@@ -5,6 +5,8 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.hibernate.validator.constraints.URL;
 
+import java.util.List;
+
 public record CreateConversionRequest(
         @NotBlank(message = "Project name is required")
         @Size(max = 64, message = "Project name must be at most 64 characters")
@@ -20,5 +22,7 @@ public record CreateConversionRequest(
         @Size(max = 128, message = "App title must be at most 128 characters")
         String appTitle,
 
-        String iconFile
+        String iconFile,
+
+        List<String> enabledModules
 ) {}

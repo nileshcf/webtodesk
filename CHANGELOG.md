@@ -4,6 +4,116 @@ All notable changes to this project are documented in this file.
 
 ---
 
+## [1.6.0] - 2026-03-29 — Docker Monolith Fix & Login 500 Resolution
+
+### Overview
+
+Resolved a critical runtime failure where `POST /user/auth/login` returned HTTP 500 because the user-service could not connect to its database. Root cause: `docker-compose.yml` was wired to build individual per-service Dockerfiles instead of the unified monolith `Dockerfile`, causing environment variables from `.env` to never be injected.
+
+### Fixed
+
+- **`docker-compose.yml`**: Replaced 5-service compose definition with a single monolith service that builds from the root `Dockerfile` with `env_file: .env`. This is the correct execution model — all services run in one container behind nginx on port 7860.
+- **`deploy/entrypoint.sh`**: Reverted to the clean simple form — cloud services (Neon PostgreSQL, Upstash Redis, MongoDB Atlas) are injected via `.env`; no local database init needed.
+- **`Dockerfile`**: Removed erroneously added `postgresql`/`redis` Alpine packages and associated `ENV` vars (cloud services from `.env` are used instead).
+- **`conversion-service` compilation errors**: Restored `enabledModules` field to `ConversionProject.java` and recreated `ModuleInfoResponse.java` which were deleted by user, causing `cannot find symbol` errors during Docker Maven build.
+
+### Verified
+
+- `docker-compose up --build -d` completes with exit code 0.
+- user-service connects to Neon PostgreSQL (`HikariPool-1 - Start completed`).
+- conversion-service connects to MongoDB Atlas.
+- `POST /user/auth/login` returns 200.
+- App live at `http://localhost:7860`.
+
+---
+
+## [1.5.0] - 2026-03-28 — Week 3: Template Engine + Module System + Build Metrics
+
+### Overview
+
+Replaced all hardcoded Electron file generation strings with a Mustache-based template engine. Implemented a tier-gated module system with 5 modules. Added persistent build history via `BuildRecord` MongoDB collection. Added `ProjectWizard` frontend component for multi-step project creation with module selection.
+
+### Added
+
+#### Template Engine (`conversion-service`)
+
+- **`TemplateEngine.java`**: Mustache renderer with `ConcurrentHashMap` cache. Methods: `render(name, ctx)`, `clearCache()`, `getCacheSize()`. Templates loaded from `classpath:/templates/electron/`.
+- **Mustache templates** (`src/main/resources/templates/electron/`):
+  - `config.mustache` — Electron `config.js`
+  - `main.mustache` — Electron `main.js`
+  - `preload.mustache` — Electron `preload.js`
+  - `package.mustache` — `package.json`
+- **`TemplateEngineTest.java`** — 7 tests: render, cache hit, `clearCache()`, nonexistent template error.
+
+#### Module System (`conversion-service`)
+
+- **`ModuleRegistry.java`**: 5 module definitions with tier gates. Methods: `getAllModules()`, `getAvailableModules(tier)`, `isAvailable(key, tier)`, `resolveEnabledModules(list, tier)`, `get(key)`.
+  - TRIAL tier: `splash-screen`, `offline`, `badge`
+  - PRO tier: `screen-protect`, `deep-link`
+- **Module templates** (`src/main/resources/templates/electron/modules/`): one `.mustache` per module.
+- **`ConversionProject.java`**: Added `enabledModules: List<String>` field.
+- **`CreateConversionRequest` + `UpdateConversionRequest`**: Added `enabledModules` parameter.
+- **`ModuleRegistryTest.java`** — 19 tests covering all tier combinations and edge cases.
+
+#### Build Metrics & History (`conversion-service`)
+
+- **`BuildRecord.java`**: `@Document(collection="build_records")` with: `projectId`, `projectName`, `userEmail`, `tier`, `result`, `buildError`, `artifactUrl`, `buildTarget`, `enabledModules`, `startedAt`, `completedAt`, `durationMs`.
+- **`BuildRecordRepository.java`**: `findByProjectIdOrderByStartedAtDesc`, `findByUserEmailOrderByStartedAtDesc`, `countByProjectIdAndResult`.
+- **`BuildMetricsService.java`**: `save()`, `getBuildHistory()`, `getUserBuildHistory()`, `getProjectMetrics()`.
+- **`BuildRecordResponse.java`**: DTO with static `from(BuildRecord)` factory.
+- **`ModuleInfoResponse.java`**: DTO record with `key`, `name`, `description`, `requiredTier`, `available`.
+
+#### Frontend
+
+- **`components/ProjectWizard.tsx`**: 3-step multi-page wizard:
+  - Step 1: Basic Info (name, URL, title, icon, version)
+  - Step 2: Features — module selection with tier-gated lock icons
+  - Step 3: Review + Submit
+  - Props: `userTier`, `initialData`, `onSubmit`, `onCancel`, `submitLabel`
+
+### Changed
+
+- **`BuildService.java`**: `generateFiles()` refactored to use `TemplateEngine` + `ModuleRegistry`; hardcoded `generate*` string methods removed. Wired to save `BuildRecord` on build success and failure.
+- **`ConversionService.java`**: `generateElectronProject()` now uses `TemplateEngine`.
+- **`BuildController.java`**: Added `GET /build/modules?tier={tier}` and `GET /build/metrics/{projectId}`; history/metrics endpoints backed by real `BuildMetricsService` data.
+
+### Verified
+
+- **83/83 tests passing** (up from 57): `TemplateEngineTest` (7) + `ModuleRegistryTest` (19) + `ConversionServiceTest` (18) + `ConversionControllerTest` (10) + `LicenseServiceTest` (17) + `LicenseControllerTest` (12).
+
+---
+
+## [1.4.0] - 2026-03-28 — Week 2: Licensing System + Build Queue + Frontend Components
+
+### Overview
+
+Implemented a complete tier-based licensing system (Trial/Starter/Pro/Lifetime), build queue management, and all frontend UI components. All 57 tests passing.
+
+### Added
+
+#### Backend Licensing (`conversion-service`)
+
+- **`LicenseTier` enum** + licensing fields added to `ConversionProject`: `tier`, `licenseExpiresAt`, `buildCount`, `maxBuilds`, `licenseId` (all nullable — existing MongoDB documents remain valid).
+- **License DTOs** (10): `LicenseInfoResponse`, `LicenseDashboardResponse`, `LicenseValidationResponse`, `LicenseRestrictionsResponse`, `LicenseUsageStatsResponse`, `UpgradeOptionResponse`, `ValidateLicenseRequest`, `InitiateUpgradeRequest`, `InitiateUpgradeResponse`, `CompleteUpgradeRequest`.
+- **`LicenseViolationException`** → `GlobalExceptionHandler` returns **402 Payment Required**.
+- **`LicenseService.java`**: Tier validation, 60s in-memory `ConcurrentHashMap` cache, build quota enforcement, dashboard, usage stats, feature availability, upgrade stub, refresh.
+- **`BuildQueueService.java`**: `ConcurrentMap` active-build tracking, normal/priority depth counters, queue status with avg-wait estimate.
+- **`LicenseController.java`** (`/license/**`) — 10 endpoints: `GET /current`, `GET /dashboard`, `POST /validate`, `GET /upgrade-options`, `POST /upgrade`, `POST /upgrade/complete`, `GET /usage`, `GET /features/{id}/availability`, `GET /restrictions`, `POST /refresh`.
+- **`BuildController.java`** (`/build/**`) — 13 endpoints: `POST /trigger`, `GET /status/{id}`, `GET /progress/{id}` (SSE), `GET /queue/status`, `POST /cancel/{id}`, `POST /retry/{id}`, `GET /file-types/{os}`, `POST /validate-config`, `GET /metrics`, `GET /history/{id}`, `GET /download/{id}`, `GET /logs/{id}`.
+
+#### Frontend Components
+
+- **`components/LicenseBadge.tsx`**: Tier badge with compact mode + expiry warning.
+- **`components/BuildProgress.tsx`**: SSE-connected progress bar with stage chips.
+- **`components/FeatureToggle.tsx`**: Blurred locked state + upgrade overlay + `UpgradeModal` trigger.
+- **`components/UpgradeModal.tsx`**: 3-plan upgrade cards (Starter/Pro/Lifetime) + Stripe stub.
+
+### Verified
+
+- **57/57 tests passing**: `ConversionControllerTest` (10) + `LicenseControllerTest` (12) + `ConversionServiceTest` (18) + `LicenseServiceTest` (17).
+
+---
+
 ## [1.3.0] - 2026-03-28 — Unified Dockerization & Electron-in-Docker Fixes
 
 ### Overview

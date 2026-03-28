@@ -1,0 +1,23 @@
+{
+  "name": "{{projectName}}",
+  "version": "{{currentVersion}}",
+  "description": "Desktop app for {{appTitle}}",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --publish=never"
+  },
+  "devDependencies": {
+    "electron": "^38.2.2",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.{{projectName}}.app",
+    "productName": "{{appTitle}}",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "preload.js", "config.js"{{#hasModules}}, "modules/**"{{/hasModules}}],
+    "win": { "target": "nsis" },
+    "mac": { "category": "public.app-category.utilities" },
+    "linux": { "target": "AppImage" }
+  }
+}

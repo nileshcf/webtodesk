@@ -25,9 +25,9 @@ start_jar() {
 echo "Starting services..."
 
 # Render single-container mode: disable Eureka and use direct localhost routing.
-start_jar "/app/user/*.jar" "8081" "user" "-Xms128m -Xmx512m" "--eureka.client.enabled=false"
+start_jar "/app/user/*.jar"       "8081" "user"       "-Xms128m -Xmx512m" "--eureka.client.enabled=false"
 start_jar "/app/conversion/*.jar" "8082" "conversion" "-Xms128m -Xmx512m" "--eureka.client.enabled=false"
-start_jar "/app/gateway/*.jar" "8080" "gateway" "-Xms128m -Xmx512m" "--eureka.client.enabled=false"
+start_jar "/app/gateway/*.jar"    "8080" "gateway"    "-Xms128m -Xmx512m" "--eureka.client.enabled=false"
 
 echo "Starting nginx..."
 nginx -g "daemon off;"

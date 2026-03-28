@@ -1,12 +1,17 @@
 package com.example.conversion_service.controller;
 
+import com.example.conversion_service.dto.BuildRecordResponse;
 import com.example.conversion_service.dto.BuildStatusResponse;
 import com.example.conversion_service.dto.ConversionResponse;
+import com.example.conversion_service.dto.ModuleInfoResponse;
 import com.example.conversion_service.entity.ConversionProject;
 import com.example.conversion_service.entity.ConversionProject.ConversionStatus;
+import com.example.conversion_service.entity.ConversionProject.LicenseTier;
+import com.example.conversion_service.service.BuildMetricsService;
 import com.example.conversion_service.service.BuildQueueService;
 import com.example.conversion_service.service.BuildService;
 import com.example.conversion_service.service.ConversionService;
+import com.example.conversion_service.service.ModuleRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +37,8 @@ public class BuildController {
     private final BuildService buildService;
     private final ConversionService conversionService;
     private final BuildQueueService buildQueueService;
+    private final BuildMetricsService buildMetricsService;
+    private final ModuleRegistry moduleRegistry;
 
     /**
      * POST /build/trigger — trigger a build for a project.
@@ -143,10 +150,8 @@ public class BuildController {
             @RequestHeader("X-User-Email") String userEmail,
             @RequestParam(defaultValue = "month") String period) {
         return ResponseEntity.ok(Map.of(
-                "buildsByTier", Map.of(),
-                "buildsByOS", Map.of(),
                 "queueStats", buildQueueService.getQueueStatus(),
-                "monthlyUsage", List.of()
+                "recentBuilds", buildMetricsService.getUserBuildHistory(userEmail, 10)
         ));
     }
 
@@ -155,21 +160,38 @@ public class BuildController {
      * Stub: returns single-item history from current project state.
      */
     @GetMapping("/history/{projectId}")
-    public ResponseEntity<List<Map<String, Object>>> getBuildHistory(
+    public ResponseEntity<List<BuildRecordResponse>> getBuildHistory(
             @PathVariable("projectId") String projectId,
             @RequestParam(defaultValue = "10") int limit) {
-        ConversionProject project = conversionService.findProjectById(projectId);
-        if (project.getBuildArtifactPath() == null) {
-            return ResponseEntity.ok(List.of());
+        return ResponseEntity.ok(buildMetricsService.getBuildHistory(projectId, limit));
+    }
+
+    /**
+     * GET /build/metrics/{projectId} — aggregate metrics for a single project.
+     */
+    @GetMapping("/metrics/{projectId}")
+    public ResponseEntity<Map<String, Object>> getProjectMetrics(
+            @PathVariable("projectId") String projectId) {
+        return ResponseEntity.ok(buildMetricsService.getProjectMetrics(projectId));
+    }
+
+    /**
+     * GET /build/modules — list all available modules with tier requirements.
+     */
+    @GetMapping("/modules")
+    public ResponseEntity<List<ModuleInfoResponse>> listModules(
+            @RequestParam(required = false, defaultValue = "TRIAL") String tier) {
+        LicenseTier licenseTier;
+        try {
+            licenseTier = LicenseTier.valueOf(tier.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            licenseTier = LicenseTier.TRIAL;
         }
-        return ResponseEntity.ok(List.of(Map.of(
-                "success", project.getStatus() == ConversionStatus.READY,
-                "targetOS", "WINDOWS",
-                "artifactUrl", project.getBuildArtifactPath() != null ? project.getBuildArtifactPath() : "",
-                "downloadUrl", project.getBuildArtifactPath() != null ? project.getBuildArtifactPath() : "",
-                "buildTime", 0,
-                "error", project.getBuildError() != null ? project.getBuildError() : ""
-        )));
+        final LicenseTier finalTier = licenseTier;
+        List<ModuleInfoResponse> modules = moduleRegistry.getAllModules().stream()
+                .map(def -> ModuleInfoResponse.from(def, moduleRegistry.isAvailable(def.key(), finalTier)))
+                .collect(java.util.stream.Collectors.toList());
+        return ResponseEntity.ok(modules);
     }
 
     /**

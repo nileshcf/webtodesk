@@ -1,7 +1,9 @@
 package com.example.conversion_service.service;
 
+import com.example.conversion_service.entity.BuildRecord;
 import com.example.conversion_service.entity.ConversionProject;
 import com.example.conversion_service.entity.ConversionProject.ConversionStatus;
+import com.example.conversion_service.entity.ConversionProject.LicenseTier;
 import com.example.conversion_service.exception.ProjectNotFoundException;
 import com.example.conversion_service.repository.ConversionRepository;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +31,9 @@ public class BuildService {
     private final R2StorageService r2StorageService;
     private final LicenseService licenseService;
     private final BuildQueueService buildQueueService;
+    private final TemplateEngine templateEngine;
+    private final ModuleRegistry moduleRegistry;
+    private final BuildMetricsService buildMetricsService;
 
     @Value("${webtodesk.build.output-dir:${java.io.tmpdir}/webtodesk-builds}")
     private String buildOutputDir;
@@ -236,6 +241,22 @@ public class BuildService {
         project.setBuildError(null);
         project.setBuildCount(project.getBuildCount() != null ? project.getBuildCount() + 1 : 1);
         repository.save(project);
+
+        // Record successful build
+        long successDurationMs = project.getBuildStartedAt() != null
+                ? Instant.now().toEpochMilli() - project.getBuildStartedAt().toEpochMilli() : 0;
+        buildMetricsService.save(BuildRecord.builder()
+                .projectId(project.getId())
+                .projectName(project.getProjectName())
+                .userEmail(project.getCreatedBy())
+                .tier(project.getTier() != null ? project.getTier() : LicenseTier.TRIAL)
+                .result("READY")
+                .artifactUrl(publicUrl)
+                .buildTarget(resolveBuildTarget().cliValue)
+                .enabledModules(project.getEnabledModules())
+                .completedAt(Instant.now())
+                .durationMs(successDurationMs)
+                .build());
 
         emitProgress(project.getId(), "COMPLETE", "Build complete! Download ready.");
         log.info("Build artifact uploaded to R2 for '{}': {}", project.getProjectName(), publicUrl);
@@ -491,6 +512,23 @@ public class BuildService {
         project.setBuildError(error);
         project.setBuildArtifactPath(null);
         repository.save(project);
+
+        // Record failed build
+        long failDurationMs = project.getBuildStartedAt() != null
+                ? Instant.now().toEpochMilli() - project.getBuildStartedAt().toEpochMilli() : 0;
+        buildMetricsService.save(BuildRecord.builder()
+                .projectId(project.getId())
+                .projectName(project.getProjectName())
+                .userEmail(project.getCreatedBy())
+                .tier(project.getTier() != null ? project.getTier() : LicenseTier.TRIAL)
+                .result("FAILED")
+                .buildError(error)
+                .buildTarget(resolveBuildTarget().cliValue)
+                .enabledModules(project.getEnabledModules())
+                .completedAt(Instant.now())
+                .durationMs(failDurationMs)
+                .build());
+
         emitProgress(project.getId(), "FAILED", error);
     }
 
@@ -522,11 +560,46 @@ public class BuildService {
     // ─── Electron File Generators ────────────────────────
 
     private Map<String, String> generateFiles(ConversionProject project) {
+        LicenseTier tier = project.getTier() != null ? project.getTier() : LicenseTier.TRIAL;
+        List<String> resolved = moduleRegistry.resolveEnabledModules(project.getEnabledModules(), tier);
+
+        StringBuilder requires = new StringBuilder();
+        StringBuilder setups = new StringBuilder();
+        for (String key : resolved) {
+            String varName = key.replace('-', '_');
+            requires.append("const ").append(varName)
+                    .append(" = require('./modules/").append(key).append("');\n");
+            setups.append("  ").append(varName).append(".setup(mainWindow, moduleConfig);\n");
+        }
+
+        String modulesJson = resolved.isEmpty() ? "[]"
+                : "[\"" + String.join("\",\"", resolved) + "\"]"; 
+
+        Map<String, Object> ctx = new HashMap<>();
+        ctx.put("projectName",   project.getProjectName());
+        ctx.put("currentVersion", project.getCurrentVersion() != null ? project.getCurrentVersion() : "1.0.0");
+        ctx.put("appTitle",       project.getAppTitle());
+        ctx.put("websiteUrl",     project.getWebsiteUrl());
+        ctx.put("iconFile",       project.getIconFile() != null ? project.getIconFile() : "icon.ico");
+        ctx.put("modulesJson",    modulesJson);
+        ctx.put("hasModules",     !resolved.isEmpty());
+        ctx.put("moduleRequires", requires.toString());
+        ctx.put("moduleSetups",   setups.toString());
+
         Map<String, String> files = new LinkedHashMap<>();
-        files.put("config.js", generateConfigJs(project));
-        files.put("main.js", generateMainJs());
-        files.put("preload.js", generatePreloadJs());
-        files.put("package.json", generatePackageJson(project));
+        files.put("config.js",    templateEngine.render("config.mustache",  ctx));
+        files.put("main.js",      templateEngine.render("main.mustache",    ctx));
+        files.put("preload.js",   templateEngine.render("preload.mustache", ctx));
+        files.put("package.json", templateEngine.render("package.mustache", ctx));
+
+        for (String key : resolved) {
+            moduleRegistry.get(key).ifPresent(def ->
+                    files.put("modules/" + key + ".js",
+                            templateEngine.render(def.templateFile(), Map.of())));
+        }
+
+        log.debug("Generated {} files ({} modules) for project '{}'",
+                files.size(), resolved.size(), project.getProjectName());
         return files;
     }
 

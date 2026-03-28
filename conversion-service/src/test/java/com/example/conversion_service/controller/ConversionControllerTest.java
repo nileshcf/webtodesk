@@ -57,7 +57,7 @@ class ConversionControllerTest {
 
     @Test
     void create_shouldDelegateToServiceAndReturn200() {
-        var request = new CreateConversionRequest("My App", "https://example.com", "My App", null);
+        var request = new CreateConversionRequest("My App", "https://example.com", "My App", null, null);
         when(conversionService.create(any(), eq("user@test.com"))).thenReturn(sampleResponse());
 
         ResponseEntity<ConversionResponse> response = controller.create(request, "user@test.com");
@@ -110,7 +110,7 @@ class ConversionControllerTest {
         );
         when(conversionService.update(eq("proj-123"), any())).thenReturn(updated);
 
-        var request = new UpdateConversionRequest(null, "https://new-site.com", "New Title", null, "2.0.0");
+        var request = new UpdateConversionRequest(null, "https://new-site.com", "New Title", null, "2.0.0", null);
         ResponseEntity<ConversionResponse> response = controller.update("proj-123", request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
