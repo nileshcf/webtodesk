@@ -39,77 +39,105 @@ public class AuthService {
 
     @Transactional
     public RegisterResponse register(SignupRequest request) {
-        if (userRepository.existsByEmail(request.email())) {
-            throw new RuntimeException("Email already taken");
+        log.info("Starting user registration for email: {}", request.email());
+        
+        try {
+            if (userRepository.existsByEmail(request.email())) {
+                log.warn("Registration failed - email already exists: {}", request.email());
+                throw new RuntimeException("Email already taken");
+            }
+
+            log.debug("Creating new user entity for email: {}", request.email());
+            // 1. Create User
+            User user = new User();
+            user.setUsername(request.username());
+            user.setEmail(request.email());
+            user.setEmailVerified(false);
+            user.setPassword(passwordEncoder.encode(request.password()));
+            user.setRoles(List.of(Roles.ROLE_USER));
+            user.setCreatedAt(LocalDateTime.now());
+
+            log.debug("Creating user profile for email: {}", request.email());
+            UserProfile profile = UserProfile.builder()
+                    .user(user)
+                    .phoneNumber(request.phoneNumber())
+                    .build();
+
+            user.setProfile(profile);
+            userRepository.save(user);
+
+            log.info("User {} registered successfully with ID: {}", user.getEmail(), user.getId());
+
+            return new RegisterResponse("User registered successfully", user.getEmail(), user.getId(), user.getCreatedAt());
+        } catch (RuntimeException e) {
+            // Re-throw runtime exceptions as-is (they're already logged)
+            throw e;
+        } catch (Exception e) {
+            log.error("Unexpected error during user registration for email: {} - Error: {}", request.email(), e.getMessage(), e);
+            throw new RuntimeException("Failed to register user", e);
         }
-
-        // 1. Create User
-        User user = new User();
-        user.setUsername(request.username());
-        user.setEmail(request.email());
-        user.setEmailVerified(false);
-        user.setPassword(passwordEncoder.encode(request.password()));
-        user.setRoles(List.of(Roles.ROLE_USER));
-        user.setCreatedAt(LocalDateTime.now());
-
-
-        UserProfile profile = UserProfile.builder()
-                .user(user)
-                .phoneNumber(request.phoneNumber())
-                .build();
-
-        user.setProfile(profile);
-        userRepository.save(user);
-
-        log.info("User {} registered successfully", user.getEmail());
-
-        return new RegisterResponse("User registered successfully", user.getEmail(), user.getId(), user.getCreatedAt());
     }
 
     public LoginResponse login(LoginRequest request) {
+        log.info("Login attempt for email: {}", request.email());
 
-        // 1. Authenticate first — throws exception if credentials wrong
         try {
-            authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(request.email(), request.password())
+            // 1. Authenticate first — throws exception if credentials wrong
+            try {
+                authenticationManager.authenticate(
+                        new UsernamePasswordAuthenticationToken(request.email(), request.password())
+                );
+                log.debug("Authentication successful for email: {}", request.email());
+            } catch (Exception e) {
+                log.error("Authentication failed for email: {} - Error: {}", request.email(), e.getMessage());
+                throw e;
+            }
+
+            // 2. Fetch user — guaranteed to exist after authentication passes
+            User user = userRepository.findByEmail(request.email())
+                    .orElseThrow(() -> {
+                        log.error("User not found after successful authentication for email: {}", request.email());
+                        return new RuntimeException("User not found");
+                    });
+
+            log.debug("Generating tokens for user: {} with roles: {}", user.getEmail(), user.getRoles());
+            // 3. Convert Enum roles to Strings for JWT
+            List<String> roleStrings = user.getRoles().stream()
+                    .map(Roles::name)                         // ROLE_USER enum → "ROLE_USER" String
+                    .collect(Collectors.toList());
+
+            // 4. Prepare Claims
+            Map<String, Object> claims = new HashMap<>();
+            claims.put("userId", user.getId());
+            claims.put("roles", roleStrings);                 // ✅ Strings in JWT, not Enum
+            claims.put("email", user.getEmail());
+            claims.put("username", user.getUsername());
+
+            // 5. Generate tokens
+            String accessToken  = jwtTokenProvider.generateAccessToken(
+                    request.email(), claims, JwtConstants.ACCESS_TOKEN_EXPIRY);
+            String refreshToken = jwtTokenProvider.generateRefreshToken(
+                    request.email(), JwtConstants.REFRESH_TOKEN_EXPIRY);
+
+            log.info("Login successful for email: {}", request.email());
+            return new LoginResponse(
+                    accessToken,
+                    refreshToken,
+                    "Bearer",
+                    JwtConstants.ACCESS_TOKEN_EXPIRY / 1000,  // ✅ convert ms to seconds for frontend
+                    user.getId(),
+                    user.getEmail(),
+                    roleStrings                               // ✅ return Strings not Enum to frontend
             );
-        } catch (Exception e) {
-            log.error("Authentication failed: {}", e.getMessage());  // ✅ see exact error
+        } catch (RuntimeException e) {
+            // Re-throw runtime exceptions as-is (they're already logged)
             throw e;
+        } catch (Exception e) {
+            log.error("Unexpected error during login for email: {} - Error: {}", request.email(), e.getMessage(), e);
+            throw new RuntimeException("Login failed due to unexpected error", e);
         }
-
-        // 2. Fetch user — guaranteed to exist after authentication passes
-        User user = userRepository.findByEmail(request.email())
-                .orElseThrow(() -> new RuntimeException("User not found"));
-
-        // 3. Convert Enum roles to Strings for JWT
-        List<String> roleStrings = user.getRoles().stream()
-                .map(Roles::name)                         // ROLE_USER enum → "ROLE_USER" String
-                .collect(Collectors.toList());
-
-        // 4. Prepare Claims
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("userId", user.getId());
-        claims.put("roles", roleStrings);                 // ✅ Strings in JWT, not Enum
-        claims.put("email", user.getEmail());
-        claims.put("username", user.getUsername());
-
-        // 5. Generate tokens
-        String accessToken  = jwtTokenProvider.generateAccessToken(
-                request.email(), claims, JwtConstants.ACCESS_TOKEN_EXPIRY);
-        String refreshToken = jwtTokenProvider.generateRefreshToken(
-                request.email(), JwtConstants.REFRESH_TOKEN_EXPIRY);
-
-        return new LoginResponse(
-                accessToken,
-                refreshToken,
-                "Bearer",
-                JwtConstants.ACCESS_TOKEN_EXPIRY / 1000,  // ✅ convert ms to seconds for frontend
-                user.getId(),
-                user.getEmail(),
-                roleStrings                               // ✅ return Strings not Enum to frontend
-        );
     }
+
     public RefreshResponse refreshToken(RefreshRequest request) {
         log.info("Refresh token request received");
 
