@@ -12,6 +12,7 @@ spring:
 webtodesk:
   build:
     output-dir: ${BUILD_OUTPUT_DIR:${java.io.tmpdir}/webtodesk-builds}
+    target-platform: ${WEBTODESK_BUILD_TARGET_PLATFORM:auto}
     repo-url: ${REPO_URL:https://github.com/nileshcf/webtodesk.git}
   r2:
     enabled: ${R2_ENABLED:true}
