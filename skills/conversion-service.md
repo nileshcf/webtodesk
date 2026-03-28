@@ -427,51 +427,323 @@ R2 cloud storage, local build orchestration using Node.js & Electron Builder, SS
 (All changes above local — deploy to Docker/Hugging Face Space to test end-to-end.)
 ```
 
-### WEEK 2 — TEMPLATE ENGINE + MODULE SYSTEM (Days 8–14)
+### WEEK 2 — FRONTEND INTEGRATION + LICENSING BACKEND (Days 8–14)
 
-**Goal:** Extract Electron generation from hardcoded strings into a configurable template engine.
+**Goal**: Implement complete frontend integration with licensing system, build queue management, and real-time monitoring.
 
 ```
+## TASK: Frontend Licensing Integration
+## WEEK: 2
+## SCOPE: frontend, types, services, hooks, components
+
 ### TODO
-- [ ] P0 · Add Mustache dependency to pom.xml
-- [ ] P0 · Extract 4 template strings from BuildService → .mustache files
-- [ ] P0 · Create TemplateEngine.java
-- [ ] P0 · Refactor BuildService.generateFiles() to use TemplateEngine
-- [ ] P1 · Add new fields to ConversionProject: modules, platforms, windowWidth/Height, etc.
-- [ ] P1 · Create ModuleRegistry.java
-- [ ] P1 · Create module templates (screen-protect, badge, offline, loader)
-- [ ] P1 · OpenAPI config (springdoc-openapi)
-- [ ] TEST · TemplateEngine output matches hardcoded output for zero-module builds
-- [ ] TEST · ModuleRegistry validates known/unknown modules
-```
+- [ ] P0 · Add TypeScript types for licensing (license.ts, build.ts, modules.ts, upgrade.ts)
+- [ ] P0 · Create licenseApi.ts with 9 endpoints for license management
+- [ ] P0 · Create buildApi.ts with 12 endpoints for build queue and monitoring
+- [ ] P0 · Create versionApi.ts with 15 endpoints for version management
+- [ ] P0 · Implement useLicense.ts hook for license state management
+- [ ] P0 · Implement useBuildQueue.ts hook for real-time build monitoring
+- [ ] P1 · Create multi-step ProjectWizard component with license selection
+- [ ] P1 · Create LicenseBadge component for tier display
+- [ ] P1 · Create BuildProgress component with SSE integration
+- [ ] P1 · Create FeatureToggle component with upgrade prompts
+- [ ] P1 · Create UpgradeModal component for license upgrades
+- [ ] TEST · Frontend integration tests for all license flows
+- [ ] TEST · Build queue monitoring with mock SSE events
 
-### WEEK 3 — BUILD HISTORY + ASYNC PIPELINE (Days 15–21)
+## TASK: Backend Licensing Services
+## WEEK: 2
+## SCOPE: service, controller, dto, entity
 
-**Goal:** Build history tracking, build record entity, icon upload.
-
-### WEEK 4 — LICENSING + VERSION UPGRADE + PRODUCTION (Days 22–30)
-
-**Goal:** Implement licensing tiers, license expiry enforcement, version upgrade system, OS compatibility matrix, and production hardening.
-
-```
 ### TODO
-- [ ] P0 · Add LicenseService with tier validation (Trial/Starter/Pro/Lifetime)
-- [ ] P0 · Add license fields to ConversionProject (tier, licenseExpiresAt, buildCount)
-- [ ] P0 · Implement license expiry check in runtime (license-expired.html screen)
-- [ ] P0 · Add build quota enforcement (Trial: 4 builds, Starter: 120, Pro: 3000)
-- [ ] P0 · Add OS compatibility matrix (Windows/Linux/Mac support per tier)
-- [ ] P0 · Add BuildFlags and FileTypeResolver for OS-specific builds
-- [ ] P0 · Implement priority queue routing (Normal vs Priority executors)
-- [ ] P1 · Implement version upgrade system (automatic updates, license persistence)
-- [ ] P1 · Add license expiry blocking logic (full screen lock, upgrade CTA)
-- [ ] P1 · Rate limiting and subscription gating endpoints
-- [ ] P2 · Production hardening (monitoring, logging, metrics)
+- [ ] P0 · Create LicenseService.java with tier validation and caching
+- [ ] P0 · Create BuildQueueService.java with priority routing and SSE
+- [ ] P0 · Create VersionUpgradeService.java with license persistence
+- [ ] P0 · Add LicenseController.java with 9 license management endpoints
+- [ ] P0 · Create license DTOs (LicenseInfo, LicenseDashboard, BuildFlags, etc.)
+- [ ] P0 · Update ConversionProject entity with license fields
+- [ ] P0 · Implement license validation with Redis caching
+- [ ] P1 · Add build metrics collection and reporting
+- [ ] P1 · Implement SSE streaming for build progress
 - [ ] TEST · License validation tests for all tiers
+- [ ] TEST · Build queue routing and priority tests
 - [ ] TEST · Version upgrade migration tests
-- [ ] TEST · OS file type resolution and queue routing tests
+
+## TASK: Database Schema Updates
+## WEEK: 2
+## SCOPE: entity, repository, migration
+
+### TODO
+- [ ] P0 · Add license fields to ConversionProject entity
+- [ ] P0 · Create MongoDB indexes for license queries
+- [ ] P0 · Implement data migration script for existing projects
+- [ ] P1 · Add Redis cache configuration for license data
+- [ ] TEST · Database migration validation
+- [ ] TEST · Performance tests for license queries
 ```
 
-### WEEK 4 — ENHANCED ARCHITECTURE IMPLEMENTATION
+### WEEK 3 — MODULE SYSTEM + BUILD PIPELINE (Days 15–21)
+
+**Goal**: Implement configurable module system with template engine and advanced build pipeline features.
+
+```
+## TASK: Template Engine Implementation
+## WEEK: 3
+## SCOPE: service, template, config
+
+### TODO
+- [ ] P0 · Add Mustache dependency to conversion-service pom.xml
+- [ ] P0 · Create TemplateEngine.java with caching
+- [ ] P0 · Extract 4 Electron templates from BuildService to .mustache files
+- [ ] P0 · Create template registry for module injection points
+- [ ] P1 · Refactor BuildService.generateFiles() to use TemplateEngine
+- [ ] TEST · Template output matches hardcoded output
+- [ ] TEST · Template caching performance tests
+
+## TASK: Module System Architecture
+## WEEK: 3
+## SCOPE: entity, service, dto, template
+
+### TODO
+- [ ] P0 · Create ModuleRegistry.java with tier-based availability
+- [ ] P0 · Create ModuleConfig.java for feature configuration
+- [ ] P0 · Implement 15 core modules (splash-screen, file-download, etc.)
+- [ ] P0 · Create module templates with setup/teardown contracts
+- [ ] P1 · Add module validation and dependency checking
+- [ ] P1 · Create module configuration UI components
+- [ ] TEST · Module registry validation tests
+- [ ] TEST · Module injection point tests
+- [ ] TEST · Tier-based module availability tests
+
+## TASK: Advanced Build Pipeline
+## WEEK: 3
+## SCOPE: service, config, metrics
+
+### TODO
+- [ ] P0 · Implement cross-platform build orchestration
+- [ ] P0 · Add BuildMetrics.java for performance tracking
+- [ ] P0 · Create FileTypeResolver with OS-specific mappings
+- [ ] P0 · Implement build queue with priority executors
+- [ ] P1 · Add build history tracking with BuildRecord entity
+- [ ] P1 · Implement build retry and cancellation
+- [ ] TEST · Cross-platform build tests
+- [ ] TEST · Build queue performance tests
+- [ ] TEST · Build metrics accuracy tests
+```
+
+### WEEK 4 — PRODUCTION HARDENING + MONITORING (Days 22–30)
+
+**Goal**: Production deployment with monitoring, observability, and advanced licensing features.
+
+```
+## TASK: Production Deployment
+## WEEK: 4
+## SCOPE: config, docker, deployment
+
+### TODO
+- [ ] P0 · Create production Docker configurations
+- [ ] P0 · Implement health checks with detailed status
+- [ ] P0 · Add application metrics and monitoring
+- [ ] P0 · Configure production logging and error tracking
+- [ ] P1 · Set up CI/CD pipeline with GitHub Actions
+- [ ] P1 · Implement database backup and recovery
+- [ ] TEST · Production deployment validation
+- [ ] TEST · Load testing for build queue
+- [ ] TEST · Failover and recovery tests
+
+## TASK: Advanced Licensing Features
+## WEEK: 4
+## SCOPE: service, controller, frontend
+
+### TODO
+- [ ] P0 · Implement license expiry enforcement with blocking screen
+- [ ] P0 · Add automatic version upgrade system
+- [ ] P0 · Create license analytics and reporting dashboard
+- [ ] P0 · Implement subscription billing integration (Stripe/Razorpay)
+- [ ] P1 · Add license transfer and team management
+- [ ] P1 · Create admin panel for license management
+- [ ] TEST · License expiry enforcement tests
+- [ ] TEST · Version upgrade migration tests
+- [ ] TEST · Billing integration tests
+
+## TASK: Monitoring & Observability
+## WEEK: 4
+## SCOPE: config, service, metrics
+
+### TODO
+- [ ] P0 · Implement Prometheus metrics collection
+- [ ] P0 · Add distributed tracing with Spring Cloud Sleuth
+- [ ] P0 · Create custom dashboards for build and license metrics
+- [ ] P0 · Set up alerting for critical failures
+- [ ] P1 · Add performance profiling and optimization
+- [ ] P1 · Implement security monitoring and audit logging
+- [ ] TEST · Metrics accuracy validation
+- [ ] TEST · Alerting system tests
+- [ ] TEST · Security audit tests
+```
+
+### WEEK 5+ — ADVANCED FEATURES & OPTIMIZATION (Days 31+)
+
+**Goal**: Advanced features, performance optimization, and scalability improvements.
+
+```
+## TASK: Scalability Improvements
+## WEEK: 5+
+## SCOPE: architecture, service, infrastructure
+
+### TODO
+- [ ] P1 · Implement microservice scaling with Kubernetes
+- [ ] P1 · Add database sharding for large-scale deployments
+- [ ] P1 · Implement CDN integration for build artifacts
+- [ ] P1 · Add edge caching for API responses
+- [ ] P2 · Implement multi-region deployment
+- [ ] P2 · Add advanced security features (2FA, SSO)
+- [ ] TEST · Scalability and performance tests
+- [ ] TEST · Multi-region failover tests
+
+## TASK: Advanced Features
+## WEEK: 5+
+## SCOPE: service, frontend, integration
+
+### TODO
+- [ ] P1 · Add AI-powered build optimization
+- [ ] P1 · Implement custom branding and white-labeling
+- [ ] P1 · Create plugin system for third-party integrations
+- [ ] P1 · Add advanced analytics and reporting
+- [ ] P2 · Implement mobile app management
+- [ ] P2 · Add API rate limiting and quota management
+- [ ] TEST · Advanced feature integration tests
+- [ ] TEST · Plugin system tests
+```
+
+---
+
+## 14. IMPLEMENTATION ROADMAP - WEEK 2+ DETAILED PLAN
+
+Based on the current Week 1 completion status and licensing system architecture, here's the comprehensive implementation plan for Week 2 and beyond:
+
+### 14.1 Current Status Summary
+
+**Week 1 ✅ COMPLETE:**
+- Foundation: Error handling, validation, tests, health checks
+- Build System: Local Node.js builds with cross-platform support
+- Storage: Cloudflare R2 integration with artifact upload
+- Frontend: Basic React dashboard with SSE streaming
+- Docker: Multi-stage builds with proper tooling
+
+**Ready for Week 2:**
+- Licensing system architecture designed
+- Frontend integration components specified
+- Build queue architecture planned
+- Database schema defined
+
+### 14.2 Week 2 Priority Matrix
+
+| Priority | Component | Deliverables | Dependencies | Risk |
+|----------|-----------|--------------|--------------|------|
+| **P0-Critical** | Backend Licensing | LicenseService, BuildQueueService, VersionUpgradeService | MongoDB schema, Redis cache | Medium |
+| **P0-Critical** | Frontend Integration | TypeScript types, API services, React hooks | Backend APIs | Low |
+| **P0-Critical** | Database Updates | License fields, indexes, migration script | Entity updates | Low |
+| **P1-Important** | UI Components | ProjectWizard, LicenseBadge, BuildProgress | Frontend integration | Low |
+| **P1-Important** | SSE Implementation | Real-time build progress streaming | BuildQueueService | Medium |
+
+### 14.3 Week 2 Daily Breakdown
+
+**Day 8-9: Backend Licensing Foundation**
+- Create LicenseService with tier validation
+- Implement BuildQueueService with priority routing
+- Add license DTOs and update ConversionProject entity
+- Set up Redis caching for license data
+
+**Day 10-11: Frontend Integration**
+- Create TypeScript types (license.ts, build.ts, modules.ts, upgrade.ts)
+- Implement API services (licenseApi.ts, buildApi.ts, versionApi.ts)
+- Create React hooks (useLicense.ts, useBuildQueue.ts)
+- Add basic UI components (LicenseBadge, BuildProgress)
+
+**Day 12-13: Advanced Features**
+- Implement VersionUpgradeService with license persistence
+- Add SSE streaming for real-time build monitoring
+- Create multi-step ProjectWizard component
+- Add FeatureToggle with upgrade prompts
+
+**Day 14: Integration & Testing**
+- End-to-end testing of complete license flow
+- Build queue monitoring with mock SSE events
+- Performance testing for license validation
+- Documentation updates
+
+### 14.4 Success Criteria for Week 2
+
+**Functional Requirements:**
+- ✅ Complete license tier validation (Trial/Starter/Pro/Lifetime)
+- ✅ Real-time build queue monitoring with SSE
+- ✅ Frontend multi-step project creation wizard
+- ✅ License upgrade flow with payment integration
+- ✅ Cross-platform build configuration
+
+**Technical Requirements:**
+- ✅ All 34 new API endpoints implemented and tested
+- ✅ Frontend components fully integrated with backend
+- ✅ Database migration script executed successfully
+- ✅ Redis caching configured and operational
+- ✅ SSE streaming working for build progress
+
+**Performance Requirements:**
+- ✅ License validation response time < 100ms
+- ✅ Build queue routing < 50ms
+- ✅ Frontend component render time < 200ms
+- ✅ SSE latency < 500ms
+
+### 14.5 Risk Mitigation Strategies
+
+**Technical Risks:**
+- **Database Migration Failure:** Create backup script, test on staging first
+- **Redis Cache Issues:** Implement fallback to direct database queries
+- **SSE Connection Issues:** Add reconnection logic with exponential backoff
+- **Frontend State Management:** Use React Query for server state synchronization
+
+**Integration Risks:**
+- **API Contract Changes:** Version APIs with semantic versioning
+- **License Validation Logic:** Implement comprehensive test suite
+- **Build Queue Deadlocks:** Add timeout and retry mechanisms
+- **Frontend-Backend Sync:** Implement optimistic updates with rollback
+
+### 14.6 Week 3-4 Preview
+
+**Week 3: Module System & Template Engine**
+- Mustache template implementation
+- 15 core modules with tier-based availability
+- Advanced build pipeline with metrics
+- Module configuration UI
+
+**Week 4: Production Hardening**
+- License expiry enforcement
+- Subscription billing integration
+- Monitoring and observability
+- Production deployment
+
+### 14.7 Resource Requirements
+
+**Development Resources:**
+- 1 Full-stack developer (Week 2)
+- 1 Frontend specialist (Week 2-3)
+- 1 Backend specialist (Week 2-4)
+- 1 DevOps engineer (Week 4)
+
+**Infrastructure Resources:**
+- Redis instance for caching
+- MongoDB Atlas with proper indexing
+- Cloudflare R2 for build artifacts
+- Monitoring stack (Prometheus + Grafana)
+
+**Testing Resources:**
+- Staging environment for integration testing
+- Load testing tools for build queue
+- Automated testing pipeline
+- Performance monitoring
+
+---
 
 **OS-Specific Build Flags & Priority Queue:**
 ```java
