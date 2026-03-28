@@ -3,6 +3,7 @@ package com.example.conversion_service.controller;
 import com.example.conversion_service.dto.*;
 import com.example.conversion_service.entity.ConversionProject.ConversionStatus;
 import com.example.conversion_service.exception.ProjectNotFoundException;
+import com.example.conversion_service.service.BuildService;
 import com.example.conversion_service.service.ConversionService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,6 +29,9 @@ class ConversionControllerTest {
     @Mock
     private ConversionService conversionService;
 
+    @Mock
+    private BuildService buildService;
+
     @InjectMocks
     private ConversionController controller;
 
@@ -35,7 +39,7 @@ class ConversionControllerTest {
         return new ConversionResponse(
                 "proj-123", "my-app", "https://example.com", "My App",
                 "icon.ico", "1.0.0", ConversionStatus.DRAFT,
-                "user@example.com", Instant.now(), Instant.now()
+                "user@example.com", null, false, null, null, Instant.now(), Instant.now()
         );
     }
 
@@ -102,7 +106,7 @@ class ConversionControllerTest {
         var updated = new ConversionResponse(
                 "proj-123", "my-app", "https://new-site.com", "New Title",
                 "icon.ico", "2.0.0", ConversionStatus.DRAFT,
-                "user@example.com", Instant.now(), Instant.now()
+                "user@example.com", null, false, null, null, Instant.now(), Instant.now()
         );
         when(conversionService.update(eq("proj-123"), any())).thenReturn(updated);
 

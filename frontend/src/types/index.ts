@@ -7,9 +7,9 @@ export interface User {
 
 export interface AuthTokens {
   accessToken: string;
-  refreshToken: string;
+  refreshToken?: string;
   tokenType: string;
-  expiresIn: number;
+  tokenExpiryInSeconds: number;
 }
 
 export interface LoginRequest {
@@ -32,9 +32,23 @@ export interface ConversionProject {
   iconFile: string;
   currentVersion: string;
   status: 'DRAFT' | 'READY' | 'BUILDING' | 'FAILED';
-  createdBy: string;
+  createdBy?: string;
+  buildError?: string | null;
+  downloadAvailable: boolean;
+  downloadUrl?: string | null;
+  buildProgress?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BuildStatusResponse {
+  projectId: string;
+  projectName: string;
+  status: 'DRAFT' | 'READY' | 'BUILDING' | 'FAILED';
+  buildError: string | null;
+  downloadAvailable: boolean;
+  downloadUrl: string | null;
+  updatedAt: string | null;
 }
 
 export interface CreateConversionRequest {
