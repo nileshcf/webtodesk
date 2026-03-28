@@ -23,9 +23,14 @@ export function getRefreshToken(): string | null {
 }
 
 function saveTokens(tokens: AuthTokens) {
-  localStorage.setItem('accessToken', tokens.accessToken);
-  localStorage.setItem('refreshToken', tokens.refreshToken);
-  scheduleRefresh(tokens.expiresIn);
+  if (tokens.accessToken) {
+    localStorage.setItem('accessToken', tokens.accessToken);
+  }
+  if (tokens.refreshToken) {
+    localStorage.setItem('refreshToken', tokens.refreshToken);
+  }
+  // Schedule refresh (fallback to 15 mins if not provided)
+  scheduleRefresh(tokens.tokenExpiryInSeconds || 900);
 }
 
 function clearTokens() {
