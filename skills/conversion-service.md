@@ -85,7 +85,10 @@ On every invocation the agent MUST:
 | No module system (screen-protect, biometric, etc.) | **P1** | Week 2 | Pending |
 | No API documentation (OpenAPI) | **P1** | Week 2 | Pending |
 | No build history tracking (BuildRecord entity) | **P1** | Week 3 | Pending |
-| No billing/subscription gating | **P2** | Week 4 | Pending |
+| No licensing system (Trial/Starter/Pro/Lifetime tiers) | **P2** | Week 4 | Pending |
+| No license expiry enforcement (blocking screen) | **P2** | Week 4 | Pending |
+| No version upgrade system (automatic updates) | **P2** | Week 4 | Pending |
+| No OS compatibility matrix (Windows/Linux/Mac) | **P2** | Week 4 | Pending |
 
 ### 1.3 Sibling Services (context only — do not modify without explicit request)
 
@@ -446,13 +449,365 @@ R2 cloud storage, local build orchestration using Node.js & Electron Builder, SS
 
 **Goal:** Build history tracking, build record entity, icon upload.
 
-### WEEK 4 — PLATFORM WIRING + PRODUCTION (Days 22–30)
+### WEEK 4 — LICENSING + VERSION UPGRADE + PRODUCTION (Days 22–30)
 
-**Goal:** Rate limiting, subscription gating, production hardening.
+**Goal:** Implement licensing tiers, license expiry enforcement, version upgrade system, OS compatibility matrix, and production hardening.
 
----
+```
+### TODO
+- [ ] P0 · Add LicenseService with tier validation (Trial/Starter/Pro/Lifetime)
+- [ ] P0 · Add license fields to ConversionProject (tier, licenseExpiresAt, buildCount)
+- [ ] P0 · Implement license expiry check in runtime (license-expired.html screen)
+- [ ] P0 · Add build quota enforcement (Trial: 4 builds, Starter: 120, Pro: 3000)
+- [ ] P0 · Add OS compatibility matrix (Windows/Linux/Mac support per tier)
+- [ ] P0 · Add BuildFlags and FileTypeResolver for OS-specific builds
+- [ ] P0 · Implement priority queue routing (Normal vs Priority executors)
+- [ ] P1 · Implement version upgrade system (automatic updates, license persistence)
+- [ ] P1 · Add license expiry blocking logic (full screen lock, upgrade CTA)
+- [ ] P1 · Rate limiting and subscription gating endpoints
+- [ ] P2 · Production hardening (monitoring, logging, metrics)
+- [ ] TEST · License validation tests for all tiers
+- [ ] TEST · Version upgrade migration tests
+- [ ] TEST · OS file type resolution and queue routing tests
+```
 
-## 9. QUALITY GATES
+### WEEK 4 — ENHANCED ARCHITECTURE IMPLEMENTATION
+
+**OS-Specific Build Flags & Priority Queue:**
+```java
+// BuildFlags record for OS-specific configuration
+public record BuildFlags(
+    TargetOS targetOS,           // WINDOWS, LINUX, MACOS
+    BuildPriority priority,      // NORMAL, PRIORITY
+    FileType fileType,           // EXE, MSI, APPIMAGE, DEB, RPM, DMG, ZIP
+    boolean crossPlatform,       // true = build for all OS
+    Map<TargetOS, FileType> osFileMappings  // OS → specific file type
+) {}
+
+// Priority queue routing service
+@Service
+public class BuildQueueService {
+    
+    @Autowired
+    @Qualifier("buildExecutorNormal")
+    private Executor normalExecutor;  // Trial tier: 1 thread, 50 capacity
+    
+    @Autowired
+    @Qualifier("buildExecutorPriority") 
+    private Executor priorityExecutor; // Pro tiers: 5 threads, instant dispatch
+    
+    public CompletableFuture<BuildResult> routeBuild(ConversionProject project) {
+        // License validation first
+        licenseService.validateBuildRequest(project);
+        
+        BuildFlags flags = project.getBuildFlags();
+        
+        // Resolve file type and route to appropriate queue
+        Executor executor = flags.priority() == BuildPriority.PRIORITY 
+            ? priorityExecutor : normalExecutor;
+            
+        return CompletableFuture.supplyAsync(() -> {
+            return buildService.triggerBuild(project, flags);
+        }, executor);
+    }
+}
+```
+
+**Enhanced ConversionProject Entity:**
+```java
+@Document(collection = "conversionprojects")
+public class ConversionProject {
+    
+    // Existing fields...
+    private String id, projectName, websiteUrl, appTitle, iconFile, currentVersion;
+    private ConversionStatus status;
+    private String createdBy, buildError, downloadUrl, r2Key, buildArtifactPath;
+    private Instant createdAt, updatedAt;
+    
+    // NEW: Licensing fields
+    private LicenseTier tier;
+    private Instant licenseExpiresAt;
+    private Integer buildCount, maxBuilds, activeAppsCount;
+    
+    // NEW: Build configuration
+    private BuildFlags buildFlags;
+    private ModuleRegistry moduleRegistry;
+    private LicenseMetadata licenseMetadata;
+    
+    // NEW: Feature configuration (JSON)
+    @Column(columnDefinition = "TEXT")
+    private FeatureConfig featureConfig;
+}
+```
+
+**Database Schema Updates for Licensing & OS Features:**
+```sql
+-- ConversionProject collection updates
+db.conversionprojects.updateMany(
+  {},
+  {
+    $set: {
+      tier: "TRIAL",
+      license_expires_at: new Date(Date.now() + 30*24*60*60*1000),
+      build_count: 0,
+      max_builds: 4,
+      active_apps_count: 0,
+      build_flags: {
+        targetOS: "WINDOWS",
+        priority: "NORMAL", 
+        fileType: "WINDOWS_EXE",
+        crossPlatform: false,
+        osFileMappings: {}
+      },
+      module_registry: {
+        enabled: ["splash-screen", "file-download"],
+        disabled: [],
+        config: {}
+      },
+      license_metadata: {
+        licenseId: UUID().toString(),
+        issuedAt: new Date(),
+        lastValidatedAt: new Date(),
+        migrationHistory: []
+      },
+      feature_config: {
+        tier: "TRIAL",
+        buildFlags: {
+          targetOS: "WINDOWS",
+          priority: "NORMAL",
+          fileType: "WINDOWS_EXE",
+          crossPlatform: false,
+          osFileMappings: {}
+        },
+        modules: [],
+        // ... other feature configs
+      }
+    }
+  }
+);
+
+-- Performance indexes
+db.conversionprojects.createIndex({ "tier": 1 });
+db.conversionprojects.createIndex({ "license_expires_at": 1 });
+db.conversionprojects.createIndex({ "build_flags.targetOS": 1 });
+db.conversionprojects.createIndex({ "build_flags.priority": 1 });
+db.conversionprojects.createIndex({ "created_by": 1, "build_count": 1 });
+```
+
+**Optimized File Type Detection:**
+```java
+@Component
+public class FileTypeResolver {
+    
+    private static final Map<TargetOS, Map<String, FileType>> OS_FILE_MAPPINGS = Map.of(
+        TargetOS.WINDOWS, Map.of(
+            "exe", FileType.WINDOWS_EXE,
+            "msi", FileType.WINDOWS_MSI
+        ),
+        TargetOS.LINUX, Map.of(
+            "appimage", FileType.LINUX_APPIMAGE,
+            "deb", FileType.LINUX_DEB, 
+            "rpm", FileType.LINUX_RPM
+        ),
+        TargetOS.MACOS, Map.of(
+            "dmg", FileType.MACOS_DMG,
+            "zip", FileType.MACOS_ZIP
+        )
+    );
+    
+    public FileType resolveFileType(TargetOS os, FileType requestedType) {
+        return requestedType != null ? requestedType : getDefaultFileType(os);
+    }
+    
+    public String getElectronBuilderTarget(TargetOS os) {
+        return switch (os) {
+            case WINDOWS -> "--win";
+            case LINUX -> "--linux";
+            case MACOS -> "--mac";
+        };
+    }
+}
+```
+
+## 15. OPTIMIZED BUILD PIPELINE ARCHITECTURE
+
+### 15.1 High-Performance Queue Routing
+
+**Optimized BuildQueueService with caching and batching:**
+```java
+@Service
+public class BuildQueueService {
+    
+    private final ConcurrentMap<String, CompletableFuture<BuildResult>> activeBuilds = new ConcurrentHashMap<>();
+    private final BuildMetrics buildMetrics;
+    
+    @Autowired
+    @Qualifier("buildExecutorNormal")
+    private ThreadPoolTaskExecutor normalExecutor;  // 1 thread, 50 capacity
+    
+    @Autowired
+    @Qualifier("buildExecutorPriority") 
+    private ThreadPoolTaskExecutor priorityExecutor; // 5 threads, 100 capacity
+    
+    public CompletableFuture<BuildResult> routeBuild(ConversionProject project) {
+        String buildKey = project.getId() + "_" + project.getBuildFlags().targetOS();
+        
+        // Check for duplicate builds
+        if (activeBuilds.containsKey(buildKey)) {
+            return activeBuilds.get(buildKey);
+        }
+        
+        // License validation with caching
+        licenseService.validateWithCache(project);
+        
+        BuildFlags flags = project.getBuildFlags();
+        Executor executor = selectOptimalExecutor(flags, project.getTier());
+        
+        CompletableFuture<BuildResult> buildFuture = CompletableFuture.supplyAsync(() -> {
+            try {
+                buildMetrics.recordBuildStart(project.getTier(), flags.targetOS());
+                BuildResult result = buildService.triggerBuild(project, flags);
+                buildMetrics.recordBuildSuccess(project.getTier(), flags.targetOS());
+                return result;
+            } catch (Exception e) {
+                buildMetrics.recordBuildFailure(project.getTier(), flags.targetOS());
+                throw e;
+            } finally {
+                activeBuilds.remove(buildKey);
+            }
+        }, executor);
+        
+        activeBuilds.put(buildKey, buildFuture);
+        return buildFuture;
+    }
+    
+    private Executor selectOptimalExecutor(BuildFlags flags, LicenseTier tier) {
+        // Priority queue for Pro tiers + cross-platform builds
+        if (flags.priority() == BuildPriority.PRIORITY || flags.crossPlatform()) {
+            return priorityExecutor;
+        }
+        
+        // Load balancing: if normal queue is full, route to priority if user is Pro+
+        if (tier != LicenseTier.TRIAL && normalExecutor.getActiveCount() >= normalExecutor.getCorePoolSize()) {
+            return priorityExecutor;
+        }
+        
+        return normalExecutor;
+    }
+}
+```
+
+### 15.2 Intelligent File Type Resolution
+
+**Enhanced FileTypeResolver with caching and validation:**
+```java
+@Component
+public class FileTypeResolver {
+    
+    private final Cache<String, FileType> fileTypeCache = Caffeine.newBuilder()
+        .maximumSize(1000)
+        .expireAfterWrite(Duration.ofHours(1))
+        .build();
+    
+    private static final Map<TargetOS, Map<String, FileType>> OS_FILE_MAPPINGS = Map.of(
+        TargetOS.WINDOWS, Map.of(
+            "exe", FileType.WINDOWS_EXE,
+            "msi", FileType.WINDOWS_MSI
+        ),
+        TargetOS.LINUX, Map.of(
+            "appimage", FileType.LINUX_APPIMAGE,
+            "deb", FileType.LINUX_DEB, 
+            "rpm", FileType.LINUX_RPM
+        ),
+        TargetOS.MACOS, Map.of(
+            "dmg", FileType.MACOS_DMG,
+            "zip", FileType.MACOS_ZIP
+        )
+    );
+    
+    public FileType resolveFileType(TargetOS os, FileType requestedType) {
+        String cacheKey = os.name() + "_" + (requestedType != null ? requestedType.name() : "default");
+        
+        return fileTypeCache.get(cacheKey, key -> {
+            if (requestedType != null && isValidFileTypeForOS(os, requestedType)) {
+                return requestedType;
+            }
+            return getDefaultFileType(os);
+        });
+    }
+    
+    public BuildTarget resolveElectronTarget(BuildFlags flags) {
+        TargetOS os = flags.targetOS();
+        FileType fileType = resolveFileType(os, flags.fileType());
+        
+        return switch (os) {
+            case WINDOWS -> {
+                if (fileType == FileType.WINDOWS_MSI) yield BuildTarget.WIN_MSI;
+                else yield BuildTarget.WIN_EXE;
+            }
+            case LINUX -> {
+                yield switch (fileType) {
+                    case LINUX_DEB -> BuildTarget.LINUX_DEB;
+                    case LINUX_RPM -> BuildTarget.LINUX_RPM;
+                    default -> BuildTarget.LINUX_APPIMAGE;
+                };
+            }
+            case MACOS -> {
+                if (fileType == FileType.MACOS_ZIP) yield BuildTarget.MAC_ZIP;
+                else yield BuildTarget.MAC_DMG;
+            }
+        };
+    }
+    
+    private boolean isValidFileTypeForOS(TargetOS os, FileType fileType) {
+        return OS_FILE_MAPPINGS.getOrDefault(os, Map.of()).containsValue(fileType);
+    }
+}
+```
+
+### 15.3 Cross-Platform Build Optimization
+
+**Parallel build orchestrator for multiple OS targets:**
+```java
+@Service
+public class CrossPlatformBuildService {
+    
+    public CompletableFuture<Map<TargetOS, BuildResult>> buildForAllPlatforms(ConversionProject project) {
+        Map<TargetOS, CompletableFuture<BuildResult>> platformBuilds = new HashMap<>();
+        
+        // Trigger parallel builds for all supported platforms
+        for (TargetOS os : TargetOS.values()) {
+            BuildFlags osFlags = project.getBuildFlags().withTargetOS(os);
+            ConversionProject osProject = project.withBuildFlags(osFlags);
+            
+            platformBuilds.put(os, buildQueueService.routeBuild(osProject));
+        }
+        
+        // Combine all results
+        return CompletableFuture.allOf(platformBuilds.values().toArray(new CompletableFuture[0]))
+            .thenApply(v -> {
+                Map<TargetOS, BuildResult> results = new HashMap<>();
+                platformBuilds.forEach((os, future) -> {
+                    try {
+                        results.put(os, future.get());
+                    } catch (Exception e) {
+                        results.put(os, BuildResult.failed(os, e.getMessage()));
+                    }
+                });
+                return results;
+            });
+    }
+    
+    public List<FileType> getOptimalFileTypes(TargetOS os, LicenseTier tier) {
+        // Return optimal file types based on tier and OS
+        return switch (tier) {
+            case TRIAL -> List.of(getDefaultFileType(os));
+            case STARTER -> List.of(getDefaultFileType(os));
+            case PRO, LIFETIME -> getAllFileTypesForOS(os);
+        };
+    }
+}
+```
 
 ### Java / Spring Boot
 - `mvn clean test -pl conversion-service` passes with 0 failures
@@ -554,6 +909,581 @@ Triggered by: frontend hitting `POST /conversion/conversions/{id}/build` in Dock
 
 ---
 
-*WebToDesk Conversion Service Skill — v3.2 — 2026-03-28*
-*Week 1 COMPLETE + Docker/Cross-Platform Build Fix applied.*
-*Stack: Spring Boot 3.3.6 + MongoDB + Eureka + AWS S3 SDK + Cloudflare R2 + Local Node/Electron builds + React 19/Vite 6 + Docker (Alpine + Node.js).*
+---
+
+## 13. LICENSE EXPIRY ENFORCEMENT ARCHITECTURE
+
+### 13.1 Runtime License Check
+
+**Implementation in generated main.js:**
+```javascript
+// INJECT: license expiry check (added to main.js)
+const { licenseExpiresAt, upgradeUrl, licenseTier } = require('./config');
+
+function checkLicenseExpiry(mainWindow) {
+  const now = Date.now();
+  const expiryTime = new Date(licenseExpiresAt).getTime();
+  
+  if (now > expiryTime) {
+    // License expired - show blocking screen
+    mainWindow.loadFile(path.join(__dirname, 'license-expired.html'));
+    mainWindow.setResizable(false);
+    mainWindow.setMenuBarVisibility(false);
+    mainWindow.setMaximizable(false);
+    mainWindow.setFullScreenable(false);
+    
+    // Prevent dev tools on expired screen
+    mainWindow.webContents.setDevToolsWebContents(null);
+    
+    return true; // expired
+  }
+  return false; // valid
+}
+
+// Call before loading website URL
+if (checkLicenseExpiry(mainWindow)) {
+  return; // don't load websiteUrl
+}
+```
+
+### 13.2 License Expired Screen
+
+**license-expired.html (bundled in build assets):**
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>License Expired - WebToDesk</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+    }
+    .container {
+      text-align: center;
+      max-width: 500px;
+      padding: 40px;
+    }
+    .icon {
+      font-size: 64px;
+      margin-bottom: 20px;
+    }
+    h1 {
+      font-size: 32px;
+      margin-bottom: 16px;
+    }
+    p {
+      font-size: 18px;
+      margin-bottom: 32px;
+      opacity: 0.9;
+    }
+    .upgrade-btn {
+      background: white;
+      color: #667eea;
+      padding: 12px 32px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+      transition: transform 0.2s;
+    }
+    .upgrade-btn:hover {
+      transform: scale(1.05);
+    }
+    .tier-info {
+      margin-top: 40px;
+      padding: 20px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 8px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">⏰</div>
+    <h1>License Expired</h1>
+    <p>Your WebToDesk license has expired. Upgrade to continue using your desktop apps.</p>
+    <a href="${upgradeUrl}" class="upgrade-btn" target="_blank">Upgrade Now</a>
+    <div class="tier-info">
+      <strong>Current Tier:</strong> ${licenseTier}<br>
+      <strong>Expired:</strong> ${licenseExpiresAt}
+    </div>
+  </div>
+  <script>
+    // Prevent navigation away from expired screen
+    window.addEventListener('beforeunload', (e) => {
+      e.preventDefault();
+      e.returnValue = '';
+    });
+    
+    // Disable right-click context menu
+    document.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+    });
+    
+    // Disable keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key === 'I')) {
+        e.preventDefault();
+      }
+    });
+  </script>
+</body>
+</html>
+```
+
+### 13.3 Backend License Validation
+
+**LicenseService.java validation flow:**
+```java
+@Service
+public class LicenseService {
+    
+    public void validateBuildRequest(ConversionProject project) throws LicenseViolation {
+        LicenseTier tier = project.getTier();
+        Instant now = Instant.now();
+        
+        // Check expiry
+        if (project.getLicenseExpiresAt() != null && now.isAfter(project.getLicenseExpiresAt())) {
+            throw new LicenseViolation("License expired on " + project.getLicenseExpiresAt());
+        }
+        
+        // Check build quotas
+        switch (tier) {
+            case TRIAL:
+                if (project.getBuildCount() >= 4) {
+                    throw new LicenseViolation("Trial limit reached: 4 builds maximum");
+                }
+                break;
+            case STARTER:
+                if (project.getBuildCount() >= 120) {
+                    throw new LicenseViolation("Starter limit reached: 120 builds maximum");
+                }
+                break;
+            case PRO:
+                if (project.getBuildCount() >= 3000) {
+                    throw new LicenseViolation("Pro limit reached: 3,000 builds maximum");
+                }
+                break;
+            case LIFETIME:
+                // Unlimited with fair use check
+                if (project.getBuildCount() >= 500) {
+                    // Reset monthly counter if needed
+                    resetMonthlyCounterIfNeeded(project);
+                }
+                break;
+        }
+    }
+}
+```
+
+---
+
+## 14. VERSION UPGRADE SYSTEM ARCHITECTURE
+
+### 14.1 License Persistence Strategy
+
+**License file location and format:**
+```javascript
+// userData/license.json - persists across app updates
+{
+  "licenseId": "uuid-string",
+  "tier": "STARTER|PRO|LIFETIME",
+  "appId": "app-uuid",
+  "appVersion": "2.0.0",
+  "licenseExpiresAt": "2027-03-28T10:00:00Z",
+  "buildsUsed": 15,
+  "maxBuilds": 120,
+  "features": ["screen-protect", "offline-cache", "auto-update"],
+  "issuedAt": "2026-03-28T10:00:00Z",
+  "userId": "user-email@example.com"
+}
+```
+
+**License migration logic:**
+```javascript
+// INJECT: license migration (added to main.js)
+function migrateLicense(oldLicense, newVersion) {
+  const migratedLicense = { ...oldLicense };
+  migratedLicense.appVersion = newVersion;
+  migratedLicense.lastMigratedAt = new Date().toISOString();
+  
+  // Preserve all license metadata across upgrades
+  saveLicense(migratedLicense);
+  
+  return migratedLicense;
+}
+
+function checkForVersionUpgrade() {
+  const currentVersion = app.getVersion();
+  const license = loadLicense();
+  
+  if (license.appVersion !== currentVersion) {
+    // Version mismatch - check for available upgrade
+    fetch(`${API_BASE}/apps/${license.appId}/versions`)
+      .then(response => response.json())
+      .then(versions => {
+        const latestVersion = versions[versions.length - 1];
+        if (latestVersion.version > currentVersion) {
+          showUpgradeDialog(latestVersion, license);
+        } else {
+          // Just migrate license data
+          migrateLicense(license, currentVersion);
+        }
+      })
+      .catch(error => {
+        console.error('Failed to check for updates:', error);
+        // Still migrate license even if network fails
+        migrateLicense(license, currentVersion);
+      });
+  }
+}
+```
+
+### 14.2 Version Upgrade Server Endpoints
+
+**New endpoints in ConversionController:**
+```java
+@RestController
+public class ConversionController {
+    
+    @GetMapping("/conversions/{id}/versions")
+    public ResponseEntity<List<AppVersionResponse>> getAppVersions(@PathVariable String id) {
+        // Return list of available versions for this app
+    }
+    
+    @PostMapping("/conversions/{id}/upgrade/{fromVersion}/{toVersion}")
+    public ResponseEntity<BuildStatusResponse> triggerVersionUpgrade(
+        @PathVariable String id,
+        @PathVariable String fromVersion,
+        @PathVariable String toVersion) {
+        // Generate upgrade installer that preserves license file
+    }
+    
+    @GetMapping("/conversions/{id}/upgrade/{version}/download")
+    public ResponseEntity<Void> downloadUpgradeInstaller(@PathVariable String id, @PathVariable String version) {
+        // Redirect to R2 upgrade installer URL
+    }
+}
+```
+
+### 14.3 Upgrade Installer Generation
+
+**Upgrade-specific build configuration in BuildService:**
+```java
+public class BuildService {
+    
+    public CompletableFuture<BuildResult> buildUpgrade(ConversionProject project, String targetVersion) {
+        return CompletableFuture.supplyAsync(() -> {
+            // Create upgrade workspace with license preservation
+            Path workspace = createUpgradeWorkspace(project, targetVersion);
+            
+            // Add license migration script to package.json
+            packageJson.put("scripts", Map.of(
+                "postinstall", "node scripts/migrate-license.js"
+            ));
+            
+            // Generate upgrade installer (patch, not full)
+            return buildUpgradeInstaller(workspace, project, targetVersion);
+        }, buildExecutor);
+    }
+}
+```
+
+**License migration script (scripts/migrate-license.js):**
+```javascript
+const fs = require('fs');
+const path = require('path');
+
+// Migrates license from old installation to new one
+function migrateLicense() {
+  const oldUserDataPath = process.env.OLD_USER_DATA_PATH;
+  const newUserDataPath = require('electron').app.getPath('userData');
+  
+  if (oldUserDataPath && fs.existsSync(path.join(oldUserDataPath, 'license.json'))) {
+    const oldLicense = JSON.parse(fs.readFileSync(path.join(oldUserDataPath, 'license.json')));
+    fs.writeFileSync(path.join(newUserDataPath, 'license.json'), JSON.stringify(oldLicense, null, 2));
+    console.log('License migrated successfully');
+  }
+}
+
+migrateLicense();
+```
+
+---
+
+## 16. FRONTEND INTEGRATION ARCHITECTURE
+
+### 16.1 Enhanced Frontend Structure
+
+**Updated Frontend Architecture for Licensing & OS-Specific Builds:**
+
+```
+frontend/src/
+├── components/
+│   ├── ui/                      # Reusable UI components
+│   │   ├── TierBadge.tsx         # License tier display
+│   │   ├── BuildProgress.tsx     # Real-time build progress
+│   │   ├── OSSelector.tsx        # OS target selection
+│   │   ├── ModuleToggle.tsx      # Feature module toggles
+│   │   ├── LicenseExpiryBanner.tsx # Expiry warnings
+│   │   └── UpgradePrompt.tsx     # Upgrade CTAs
+│   ├── wizard/                  # Multi-step creation wizard
+│   │   ├── ProjectWizard.tsx     # Main wizard container
+│   │   ├── BasicInfoStep.tsx     # Step 1: Basic project info
+│   │   ├── LicenseStep.tsx       # Step 2: Tier selection
+│   │   ├── OSConfigStep.tsx      # Step 3: OS configuration
+│   │   ├── FeaturesStep.tsx      # Step 4: Feature toggles
+│   │   ├── ModuleConfigStep.tsx  # Step 5: Module configuration
+│   │   ├── ReviewStep.tsx        # Step 6: Review & build
+│   │   └── StepNavigation.tsx    # Wizard navigation
+│   ├── modules/                 # Feature-specific components
+│   │   ├── SplashScreenConfig.tsx
+│   │   ├── DomainLockConfig.tsx
+│   │   ├── WatermarkConfig.tsx
+│   │   ├── KeyBindingsConfig.tsx
+│   │   ├── SystemTrayConfig.tsx
+│   │   ├── AutoUpdateConfig.tsx
+│   │   ├── FileSystemConfig.tsx
+│   │   └── WindowPolishConfig.tsx
+│   ├── license/                 # License management
+│   │   ├── LicenseDashboard.tsx  # License overview & usage
+│   │   ├── UpgradeModal.tsx      # Upgrade flow modal
+│   │   ├── TierComparison.tsx    # Tier comparison table
+│   │   ├── UsageChart.tsx        # Build usage visualization
+│   │   └── ExpiryScreen.tsx      # License expiry blocking screen
+│   ├── build/                   # Build management
+│   │   ├── BuildQueue.tsx        # Queue status & position
+│   │   ├── CrossPlatformBuild.tsx # Multi-OS build interface
+│   │   ├── VersionManager.tsx    # Version upgrade interface
+│   │   ├── BuildMetrics.tsx      # Build statistics
+│   │   └── BuildHistory.tsx      # Build history viewer
+│   └── settings/                # App settings
+│       ├── AutoUpgradeSettings.tsx
+│       ├── NotificationSettings.tsx
+│       └── AccountSettings.tsx
+├── hooks/
+│   ├── useLicense.ts            # License state management
+│   ├── useBuildQueue.ts         # Build queue monitoring
+│   ├── useFeatureConfig.ts      # Feature configuration
+│   ├── useVersionUpgrade.ts     # Version upgrade logic
+│   ├── useOSSelection.ts         # OS selection state
+│   └── useModuleConfig.ts        # Module configuration state
+├── services/
+│   ├── api.ts                   # Updated base API with auth
+│   ├── licenseApi.ts            # License-specific API calls
+│   ├── buildApi.ts              # Build-specific API calls
+│   ├── versionApi.ts            # Version management API
+│   └── moduleApi.ts             # Module configuration API
+├── types/
+│   ├── license.ts              # License-related types
+│   ├── build.ts                 # Build configuration types
+│   ├── modules.ts               # Module configuration types
+│   ├── upgrade.ts               # Version upgrade types
+│   └── index.ts                 # Export all types
+├── pages/
+│   ├── DashboardPage.tsx        # Enhanced dashboard with licensing
+│   ├── CreateProjectPage.tsx     # New project creation wizard
+│   ├── LicensePage.tsx          # License management page
+│   ├── BuildHistoryPage.tsx     # Build history and metrics
+│   └── SettingsPage.tsx        # App settings
+└── utils/
+    ├── licenseHelpers.ts       # License utility functions
+    ├── buildHelpers.ts          # Build utility functions
+    └── validation.ts            # Form validation helpers
+```
+
+### 16.2 Frontend API Integration
+
+**Enhanced API Services:**
+
+```typescript
+// licenseApi.ts - License management
+export const licenseApi = {
+  getCurrentLicense(): Promise<LicenseInfo>
+  getLicenseDashboard(): Promise<LicenseDashboard>
+  validateLicense(operation: string): Promise<LicenseValidationResponse>
+  getUpgradeOptions(): Promise<UpgradeOption[]>
+  initiateUpgrade(tier, billingCycle): Promise<{upgradeUrl, sessionId}>
+  completeUpgrade(sessionId): Promise<LicenseInfo>
+  checkFeatureAvailability(featureId): Promise<boolean>
+};
+
+// buildApi.ts - Build management
+export const buildApi = {
+  triggerBuild(request: BuildRequest): Promise<BuildStatusResponse>
+  triggerCrossPlatformBuild(request: CrossPlatformBuildRequest): Promise<CrossPlatformBuildResult>
+  getBuildStatus(projectId, targetOS?): Promise<BuildStatusResponse>
+  subscribeToBuildProgress(projectId, targetOS?): EventSource
+  getQueueStatus(): Promise<QueueStatus>
+  getBuildMetrics(period): Promise<BuildMetrics>
+  cancelBuild(projectId, targetOS?): Promise<void>
+};
+
+// versionApi.ts - Version management
+export const versionApi = {
+  getVersionHistory(projectId): Promise<VersionHistory>
+  getAvailableUpdates(projectId): Promise<AppVersion[]>
+  initiateUpgrade(request: VersionUpgradeRequest): Promise<VersionUpgradeResponse>
+  getUpgradeProgress(upgradeId): Promise<UpgradeProgress>
+  subscribeToUpgradeProgress(upgradeId): EventSource
+  getRollbackCapability(projectId): Promise<RollbackCapability>
+};
+```
+
+### 16.3 State Management Architecture
+
+**Custom Hooks for Complex State:**
+
+```typescript
+// useLicense.ts - License state management
+export function useLicense() {
+  const [currentLicense, setCurrentLicense] = useState<LicenseInfo | null>(null);
+  const [dashboard, setDashboard] = useState<LicenseDashboard | null>(null);
+  const [loading, setLoading] = useState(true);
+  
+  // Computed properties
+  const isTrial = currentLicense?.tier === LicenseTier.TRIAL;
+  const isExpired = currentLicense ? new Date(currentLicense.licenseExpiresAt) < new Date() : false;
+  const buildsRemaining = currentLicense ? currentLicense.buildsAllowed - currentLicense.buildsUsed : 0;
+  
+  // Actions
+  const validateLicense = async (operation: string) => { /* ... */ };
+  const initiateUpgrade = async (tier, billingCycle) => { /* ... */ };
+  
+  return { currentLicense, dashboard, loading, isTrial, isExpired, buildsRemaining, validateLicense, initiateUpgrade };
+}
+
+// useBuildQueue.ts - Build queue monitoring
+export function useBuildQueue() {
+  const [activeBuilds, setActiveBuilds] = useState<Map<string, BuildStatusResponse>>(new Map());
+  const [buildProgress, setBuildProgress] = useState<Map<string, BuildProgress>>(new Map());
+  const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
+  
+  // SSE subscriptions for real-time updates
+  const subscribeToBuildProgress = (projectId, targetOS) => { /* ... */ };
+  const triggerBuild = async (projectId, targetOS, fileType, priority) => { /* ... */ };
+  
+  return { activeBuilds, buildProgress, queueStatus, subscribeToBuildProgress, triggerBuild };
+}
+```
+
+### 16.4 Component Integration Patterns
+
+**License-Aware Components:**
+
+```typescript
+// TierBadge.tsx - Display current license tier
+export function TierBadge() {
+  const { currentLicense, isExpired } = useLicense();
+  
+  if (!currentLicense) return null;
+  
+  const badgeColors = {
+    TRIAL: 'bg-yellow-100 text-yellow-800',
+    STARTER: 'bg-blue-100 text-blue-800',
+    PRO: 'bg-purple-100 text-purple-800',
+    LIFETIME: 'bg-green-100 text-green-800'
+  };
+  
+  return (
+    <div className={`px-3 py-1 rounded-full text-sm font-medium ${badgeColors[currentLicense.tier]}`}>
+      {currentLicense.tier} {isExpired && '(Expired)'}
+    </div>
+  );
+}
+
+// FeatureToggle.tsx - Feature availability with upgrade prompts
+export function FeatureToggle({ featureId, children, ...props }) {
+  const { isFeatureAvailable, getUpgradeOptions } = useLicense();
+  const [isAvailable, setIsAvailable] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  
+  useEffect(() => {
+    isFeatureAvailable(featureId).then(setIsAvailable);
+  }, [featureId]);
+  
+  if (!isAvailable) {
+    return (
+      <div className="relative">
+        <div className="opacity-50 pointer-events-none" {...props}>
+          {children}
+        </div>
+        <button
+          onClick={() => setShowUpgradeModal(true)}
+          className="absolute top-2 right-2 p-1 bg-yellow-500 text-white rounded-full"
+          title="Upgrade to unlock this feature"
+        >
+          🔒
+        </button>
+        {showUpgradeModal && <UpgradeModal onClose={() => setShowUpgradeModal(false)} />}
+      </div>
+    );
+  }
+  
+  return <div {...props}>{children}</div>;
+}
+```
+
+### 16.5 Build Queue Integration
+
+**Real-time Build Monitoring:**
+
+```typescript
+// BuildProgress.tsx - Real-time build progress display
+export function BuildProgress({ projectId, targetOS }) {
+  const { buildProgress, activeBuilds, subscribeToBuildProgress } = useBuildQueue();
+  const [progress, setProgress] = useState<BuildProgress | null>(null);
+  
+  useEffect(() => {
+    const unsubscribe = subscribeToBuildProgress(projectId, targetOS);
+    return unsubscribe;
+  }, [projectId, targetOS]);
+  
+  const key = `${projectId}-${targetOS}`;
+  const currentProgress = buildProgress.get(key);
+  const buildStatus = activeBuilds.get(key);
+  
+  if (!currentProgress || !buildStatus) return null;
+  
+  return (
+    <div className="bg-white rounded-lg shadow p-4">
+      <div className="flex justify-between items-center mb-2">
+        <h3 className="font-semibold">Build Progress</h3>
+        <span className={`px-2 py-1 rounded text-xs ${
+          buildStatus.status === 'BUILDING' ? 'bg-blue-100 text-blue-800' :
+          buildStatus.status === 'READY' ? 'bg-green-100 text-green-800' :
+          'bg-red-100 text-red-800'
+        }`}>
+          {buildStatus.status}
+        </span>
+      </div>
+      
+      <div className="w-full bg-gray-200 rounded-full h-2">
+        <div 
+          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+          style={{ width: `${currentProgress.progress}%` }}
+        />
+      </div>
+      
+      <p className="text-sm text-gray-600 mt-2">{currentProgress.message}</p>
+      {currentProgress.queuePosition && (
+        <p className="text-xs text-gray-500">Queue position: {currentProgress.queuePosition}</p>
+      )}
+    </div>
+  );
+}
+```
