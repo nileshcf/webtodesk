@@ -29,14 +29,22 @@ public class UserService {
 	public UserProfileResponse getMyProfile(String email) {
 		log.info("Fetching profile for user: {}", email);
 
-		User user = userRepository.findByEmail(email)
-				.orElseThrow(() -> {
-					log.warn("User not found for email: {}", email);
-					return new RuntimeException("User not found");
-				});
+		try {
+			User user = userRepository.findByEmail(email)
+					.orElseThrow(() -> {
+						log.warn("User not found for email: {}", email);
+						return new RuntimeException("User not found");
+					});
 
-		log.info("Profile fetched successfully for user: {}", email);
-		return getUserProfileResponse(user, user.getProfile());
+			log.info("Profile fetched successfully for user: {}", email);
+			return getUserProfileResponse(user, user.getProfile());
+		} catch (RuntimeException e) {
+			// Re-throw runtime exceptions as-is (they're already logged)
+			throw e;
+		} catch (Exception e) {
+			log.error("Unexpected error fetching profile for user: {} - Error: {}", email, e.getMessage(), e);
+			throw new RuntimeException("Failed to fetch user profile", e);
+		}
 	}
 
 	// ─────────────────────────────────────────
@@ -46,40 +54,62 @@ public class UserService {
 	public UserProfileResponse updateMyProfile(String email, UpdateProfileRequest request) {
 		log.info("Updating profile for user: {}", email);
 
-		User user = userRepository.findByEmail(email)
-				.orElseThrow(() -> {
-					log.warn("User not found for email: {}", email);
-					return new RuntimeException("User not found");
-				});
+		try {
+			User user = userRepository.findByEmail(email)
+					.orElseThrow(() -> {
+						log.warn("User not found for email: {}", email);
+						return new RuntimeException("User not found");
+					});
 
-		UserProfile profile = user.getProfile();
+			UserProfile profile = user.getProfile();
+			boolean hasChanges = false;
 
-		if (request.username() != null) {
-			if (userRepository.existsByUsernameAndEmailNot(request.username(), email)) {
-				log.warn("Username already taken: {}", request.username());
-				throw new RuntimeException("Username already taken");
+			if (request.username() != null) {
+				if (userRepository.existsByUsernameAndEmailNot(request.username(), email)) {
+					log.warn("Username already taken: {} for user: {}", request.username(), email);
+					throw new RuntimeException("Username already taken");
+				}
+				if (!request.username().equals(user.getUsername())) {
+					log.debug("Updating username from: {} to: {} for user: {}", user.getUsername(), request.username(), email);
+					user.setUsername(request.username());
+					hasChanges = true;
+				}
 			}
-			log.debug("Updating username from: {} to: {}", user.getUsername(), request.username());
-			user.setUsername(request.username());
-		}
-		if (request.name() != null) {
-			log.debug("Updating name to: {}", request.name());
-			profile.setName(request.name());
-		}
-		if (request.phoneNumber() != null) {
-			log.debug("Updating phone number for user: {}", email);
+			if (request.name() != null && !request.name().equals(profile.getName())) {
+				log.debug("Updating name to: {} for user: {}", request.name(), email);
+				profile.setName(request.name());
+				hasChanges = true;
+			}
+			if (request.phoneNumber() != null && !request.phoneNumber().equals(profile.getPhoneNumber())) {
+				log.debug("Updating phone number for user: {}", email);
+				profile.setPhoneNumber(request.phoneNumber());
+				hasChanges = true;
+			}
+			if (request.avatarUrl() != null && !request.avatarUrl().equals(profile.getAvatarUrl())) {
+				log.debug("Updating avatar URL for user: {}", email);
+				profile.setAvatarUrl(request.avatarUrl());
+				hasChanges = true;
+			}
 
-			profile.setPhoneNumber(request.phoneNumber());
-		}
-		if (request.avatarUrl() != null) {
-			log.debug("Updating avatar URL for user: {}", email);
-			profile.setAvatarUrl(request.avatarUrl());
-		}
+			if (hasChanges) {
+				userRepository.save(user);
+				log.info("Profile updated successfully for user: {} with {} changes", email, 
+					(request.username() != null ? 1 : 0) + 
+					(request.name() != null ? 1 : 0) + 
+					(request.phoneNumber() != null ? 1 : 0) + 
+					(request.avatarUrl() != null ? 1 : 0));
+			} else {
+				log.info("No changes detected for user: {} profile update", email);
+			}
 
-		userRepository.save(user);
-		log.info("Profile updated successfully for user: {}", email);
-
-		return getUserProfileResponse(user, profile);
+			return getUserProfileResponse(user, profile);
+		} catch (RuntimeException e) {
+			// Re-throw runtime exceptions as-is (they're already logged)
+			throw e;
+		} catch (Exception e) {
+			log.error("Unexpected error updating profile for user: {} - Error: {}", email, e.getMessage(), e);
+			throw new RuntimeException("Failed to update user profile", e);
+		}
 	}
 
 	// ─────────────────────────────────────────
