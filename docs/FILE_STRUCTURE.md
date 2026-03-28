@@ -117,18 +117,30 @@ Complete annotated file tree of the entire project repository.
 │       │   ├── config/
 │       │   │   └── ConversionSecurityConfig.java       # Servlet security: everything permitAll, @EnableMongoAuditing
 │       │   ├── controller/
-│       │   │   └── ConversionController.java           # CRUD + generate: POST, GET, GET/{id}, PUT/{id}, DELETE/{id}, POST/{id}/generate
+│       │   │   ├── ConversionController.java           # CRUD + generate: POST, GET, GET/{id}, PUT/{id}, DELETE/{id}, POST/{id}/generate
+│       │   │   └── LicenseController.java               # License management: validate, upgrade, dashboard, restrictions
 │       │   ├── dto/
 │       │   │   ├── CreateConversionRequest.java        # Record: projectName, websiteUrl (@URL), appTitle — all validated
 │       │   │   ├── UpdateConversionRequest.java        # Record: all fields optional (partial update)
 │       │   │   ├── ConversionResponse.java             # Record: full project data with static from() mapper
-│       │   │   └── ElectronConfigResponse.java         # Record: projectName, appTitle, websiteUrl, files (Map<String,String>)
+│       │   │   ├── ElectronConfigResponse.java         # Record: projectName, appTitle, websiteUrl, files (Map<String,String>)
+│       │   │   ├── LicenseInfo.java                     # Record: tier, expiresAt, buildsUsed, buildsAllowed, activeAppsCount
+│       │   │   ├── LicenseDashboard.java                # Record: usage stats, upgrade options, feature availability
+│       │   │   ├── BuildFlags.java                      # Record: targetOS, priority, fileType, crossPlatform, osFileMappings
+│       │   │   ├── FeatureConfig.java                   # Record: tier, buildFlags, modules (all feature configurations)
+│       │   │   ├── BuildStatusResponse.java             # Record: status, progress, queuePosition, estimatedTime
+│       │   │   ├── UpgradeOption.java                   # Record: fromTier, toTier, price, benefits, migrationPath
+│       │   │   └── VersionUpgradeRequest.java           # Record: projectId, targetVersion, preserveLicenseData
 │       │   ├── entity/
-│       │   │   └── ConversionProject.java              # MongoDB @Document: conversions collection — with ConversionStatus enum
+│       │   │   └── ConversionProject.java              # MongoDB @Document: conversions collection — with ConversionStatus enum, license fields
 │       │   ├── repository/
-│       │   │   └── ConversionRepository.java           # MongoRepository: findByCreatedByOrderByCreatedAtDesc
-│       │   └── service/
-│       │       └── ConversionService.java              # CRUD + Electron project generation (config.js, main.js, preload.js, package.json)
+│       │   │   └── ConversionRepository.java           # MongoRepository: findByCreatedByOrderByCreatedAtDesc, tier queries
+│       │   ├── service/
+│       │   │   ├── ConversionService.java              # CRUD + Electron project generation (config.js, main.js, preload.js, package.json)
+│       │   │   ├── LicenseService.java                   # License validation, tier management, build limit enforcement
+│       │   │   ├── BuildQueueService.java               # Priority queue routing, OS-specific build management
+│       │   │   ├── VersionUpgradeService.java           # Version upgrade logic, license preservation, rollback capability
+│       │   │   └── BuildService.java                    # Build execution, file type resolution, cross-platform builds
 │       └── resources/
 │           └── application.yml                         # Port 8082, ⚠️ MongoDB URI (HARDCODED), Eureka URL
 │   ⚠️ MISSING: Dockerfile
@@ -146,11 +158,20 @@ Complete annotated file tree of the entire project repository.
         ├── App.tsx                                     # BrowserRouter → AuthProvider → Navbar + Routes + Footer
         ├── index.css                                   # TailwindCSS base + component layer (glass, gradients, buttons, inputs)
         ├── types/
-        │   └── index.ts                                # TypeScript interfaces: User, AuthTokens, ConversionProject, ElectronConfig, requests
+        │   ├── index.ts                                # TypeScript interfaces: User, AuthTokens, ConversionProject, ElectronConfig, requests
+        │   ├── license.ts                              # License tier enums, LicenseInfo, LicenseDashboard, UpgradeOption
+        │   ├── build.ts                                 # TargetOS, FileType enums, BuildFlags, BuildStatusResponse, BuildProgress
+        │   ├── modules.ts                               # FeatureConfig, ModuleConfig, all module-specific interfaces
+        │   └── upgrade.ts                               # AppVersion, VersionUpgradeRequest, UpgradeDialog, VersionHistory
         ├── services/
-        │   └── api.ts                                  # Axios instance + token management + authApi + conversionApi
+        │   ├── api.ts                                  # Axios instance + token management + authApi + conversionApi
+        │   ├── licenseApi.ts                           # License management endpoints and upgrade flow handling
+        │   ├── buildApi.ts                             # Build triggering, monitoring, and queue status tracking
+        │   └── versionApi.ts                           # Version upgrade management and rollback capabilities
         ├── hooks/
-        │   └── useAuth.tsx                             # AuthContext + AuthProvider: user state, login/register/logout, auto-refresh
+        │   ├── useAuth.tsx                             # AuthContext + AuthProvider: user state, login/register/logout, auto-refresh
+        │   ├── useLicense.ts                           # License state management, tier-based feature availability, upgrade flow
+        │   └── useBuildQueue.ts                        # Real-time build monitoring, queue position tracking, SSE subscriptions
         ├── pages/
         │   ├── LandingPage.tsx                         # Marketing page: Hero + BentoGrid + ScrollText sections
         │   ├── LoginPage.tsx                           # Email + password form with error handling and loading state
@@ -179,3 +200,51 @@ Complete annotated file tree of the entire project repository.
 | `nginx.conf` | ⚠️ MISSING | No reverse proxy config for production |
 | `k8s/` | ⚠️ MISSING | No Kubernetes manifests |
 | `db/migrations/` | ⚠️ MISSING | No Flyway/Liquibase migration scripts (using hibernate ddl-auto) |
+
+## New Licensing System Files
+
+### Frontend Integration
+
+**TypeScript Types:**
+- `frontend/src/types/license.ts` — License tier enums, LicenseInfo, LicenseDashboard, UpgradeOption
+- `frontend/src/types/build.ts` — TargetOS, FileType enums, BuildFlags, BuildStatusResponse, BuildProgress
+- `frontend/src/types/modules.ts` — FeatureConfig, ModuleConfig, all module-specific interfaces
+- `frontend/src/types/upgrade.ts` — AppVersion, VersionUpgradeRequest, UpgradeDialog, VersionHistory
+
+**API Services:**
+- `frontend/src/services/licenseApi.ts` — License management endpoints and upgrade flow handling
+- `frontend/src/services/buildApi.ts` — Build triggering, monitoring, and queue status tracking
+- `frontend/src/services/versionApi.ts` — Version upgrade management and rollback capabilities
+
+**Custom Hooks:**
+- `frontend/src/hooks/useLicense.ts` — License state management, tier-based feature availability, upgrade flow
+- `frontend/src/hooks/useBuildQueue.ts` — Real-time build monitoring, queue position tracking, SSE subscriptions
+
+### Backend Services
+
+**New Controllers:**
+- `conversion-service/src/main/java/com/example/conversion_service/controller/LicenseController.java`
+
+**New Services:**
+- `conversion-service/src/main/java/com/example/conversion_service/service/LicenseService.java`
+- `conversion-service/src/main/java/com/example/conversion_service/service/BuildQueueService.java`
+- `conversion-service/src/main/java/com/example/conversion_service/service/VersionUpgradeService.java`
+
+**New DTOs:**
+- `conversion-service/src/main/java/com/example/conversion_service/dto/LicenseInfo.java`
+- `conversion-service/src/main/java/com/example/conversion_service/dto/LicenseDashboard.java`
+- `conversion-service/src/main/java/com/example/conversion_service/dto/BuildFlags.java`
+- `conversion-service/src/main/java/com/example/conversion_service/dto/FeatureConfig.java`
+- `conversion-service/src/main/java/com/example/conversion_service/dto/BuildStatusResponse.java`
+- `conversion-service/src/main/java/com/example/conversion_service/dto/UpgradeOption.java`
+- `conversion-service/src/main/java/com/example/conversion_service/dto/VersionUpgradeRequest.java`
+
+### Documentation
+
+**Primary Documentation (skills/ folder):**
+- `skills/FEATURES.md` — Complete feature specifications and licensing system
+- `skills/conversion-service.md` — Technical implementation details and architecture
+
+**Updated Documentation:**
+- `README.md` — Updated with licensing features and proper documentation references
+- `docs/DB_SCHEMA.md` — Enhanced with licensing system schema and new API endpoints

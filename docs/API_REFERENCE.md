@@ -21,6 +21,45 @@ Complete endpoint documentation for the WebToDesk API. All requests go through t
    - [Update Conversion](#34-update-conversion)
    - [Delete Conversion](#35-delete-conversion)
    - [Generate Electron Project](#36-generate-electron-project)
+4. [License Management](#4-license-management)
+   - [Get Current License](#41-get-current-license)
+   - [Get License Dashboard](#42-get-license-dashboard)
+   - [Validate License](#43-validate-license)
+   - [Get Upgrade Options](#44-get-upgrade-options)
+   - [Initiate License Upgrade](#45-initiate-license-upgrade)
+   - [Complete License Upgrade](#46-complete-license-upgrade)
+   - [Check Feature Availability](#47-check-feature-availability)
+   - [Get License Restrictions](#48-get-license-restrictions)
+   - [Refresh License Cache](#49-refresh-license-cache)
+5. [Build Management](#5-build-management)
+   - [Trigger Build](#51-trigger-build)
+   - [Trigger Cross-Platform Build](#52-trigger-cross-platform-build)
+   - [Get Build Status](#53-get-build-status)
+   - [Get Build Progress](#54-get-build-progress)
+   - [Get Queue Status](#55-get-queue-status)
+   - [Get Build Metrics](#56-get-build-metrics)
+   - [Cancel Build](#57-cancel-build)
+   - [Retry Failed Build](#58-retry-failed-build)
+   - [Get Available File Types](#59-get-available-file-types)
+   - [Validate Build Configuration](#510-validate-build-configuration)
+   - [Get Build History](#511-get-build-history)
+   - [Get Build Logs](#512-get-build-logs)
+6. [Version Management](#6-version-management)
+   - [Get Version History](#61-get-version-history)
+   - [Get Available Updates](#62-get-available-updates)
+   - [Get Upgrade Dialog](#63-get-upgrade-dialog)
+   - [Initiate Version Upgrade](#64-initiate-version-upgrade)
+   - [Get Upgrade Progress](#65-get-upgrade-progress)
+   - [Subscribe to Upgrade Progress](#66-subscribe-to-upgrade-progress)
+   - [Compare Versions](#67-compare-versions)
+   - [Get Auto-Upgrade Settings](#68-get-auto-upgrade-settings)
+   - [Update Auto-Upgrade Settings](#69-update-auto-upgrade-settings)
+   - [Get Rollback Capability](#610-get-rollback-capability)
+   - [Initiate Rollback](#611-initiate-rollback)
+   - [Get Rollback History](#612-get-rollback-history)
+   - [Cancel Upgrade](#613-cancel-upgrade)
+   - [Get Changelog](#614-get-changelog)
+   - [Check License Compatibility](#615-check-license-compatibility)
 
 ---
 
@@ -684,10 +723,407 @@ All error responses follow the standard `ErrorResponse` format:
 
 ---
 
-## Gateway Routing Summary
+## 4. License Management
 
-| Incoming Path | Routed To | Strip Prefix | Service Port |
+Base path: `/conversion/license` (gateway strips `/conversion` prefix → service receives `/license`)
+
+---
+
+### 4.1 Get Current License
+
+Retrieves the current license information for the authenticated user.
+
+**`GET /conversion/license/current`**
+
+**Auth**: Yes
+
+**Success Response** — `200 OK`:
+
+```json
+{
+  "licenseId": "uuid-string",
+  "tier": "TRIAL|STARTER|PRO|LIFETIME",
+  "expiresAt": "2025-12-31T23:59:59Z",
+  "buildsUsed": 45,
+  "buildsAllowed": 3000,
+  "activeAppsCount": 3,
+  "features": {
+    "splashScreen": true,
+    "fileDownload": true,
+    "screenCaptureProtection": true,
+    "watermark": true,
+    "keyBindings": true,
+    "offlineCache": true,
+    "autoUpdate": true,
+    "notifications": true,
+    "systemTray": true,
+    "darkLightSync": true,
+    "clipboardIntegration": true,
+    "windowPolish": true,
+    "rightClickDisable": true,
+    "fileSystemAccess": true,
+    "globalHotkeys": true
+  },
+  "restrictions": {
+    "maxProjects": 10,
+    "maxBuildsPerMonth": 50,
+    "maxFileSize": 100,
+    "allowedOS": ["WINDOWS", "LINUX", "MACOS"]
+  }
+}
+```
+
+**Error Responses**:
+
+| Status | Error Code | Condition |
+| --- | --- | --- |
+| `401` | `UNAUTHORIZED` | Invalid or expired token |
+| `403` | `LICENSE_EXPIRED` | License has expired |
+| `404` | `LICENSE_NOT_FOUND` | No license found for user |
+
+---
+
+### 4.2 Get License Dashboard
+
+Retrieves dashboard statistics and usage information.
+
+**`GET /conversion/license/dashboard`**
+
+**Auth**: Yes
+
+**Success Response** — `200 OK`:
+
+```json
+{
+  "currentTier": "PRO",
+  "expiresAt": "2025-12-31T23:59:59Z",
+  "daysUntilExpiry": 45,
+  "buildsUsed": 45,
+  "buildsAllowed": 3000,
+  "buildsRemaining": 2955,
+  "activeProjects": 3,
+  "maxProjects": 10,
+  "usage": {
+    "buildsThisMonth": 12,
+    "buildsLastMonth": 8,
+    "totalBuilds": 45,
+    "averageBuildTime": "2m 30s",
+    "successRate": 0.95
+  },
+  "upgradeOptions": [
+    {
+      "fromTier": "PRO",
+      "toTier": "LIFETIME",
+      "price": 299,
+      "currency": "USD",
+      "benefits": [
+        "Unlimited builds",
+        "Lifetime access",
+        "Priority support",
+        "All future features"
+      ]
+    }
+  ],
+  "featureUsage": {
+    "splashScreen": { "used": true, "lastUsed": "2025-01-15T10:30:00Z" },
+    "fileDownload": { "used": true, "lastUsed": "2025-01-14T15:20:00Z" },
+    "screenCaptureProtection": { "used": false, "lastUsed": null }
+  }
+}
+```
+
+---
+
+### 4.3 Validate License
+
+Validates if a specific feature or operation is allowed under current license.
+
+**`POST /conversion/license/validate`**
+
+**Auth**: Yes
+
+**Request Body**:
+
+| Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| `featureId` | `string` | Yes | Feature identifier to validate |
+| `operation` | `string` | No | Specific operation (e.g., "build", "download") |
+| `targetOS` | `string` | No | Target OS for build operations |
+
+**Success Response** — `200 OK`:
+
+```json
+{
+  "valid": true,
+  "featureId": "screenCaptureProtection",
+  "tier": "PRO",
+  "expiresAt": "2025-12-31T23:59:59Z",
+  "restrictions": {
+    "maxUsage": 100,
+    "currentUsage": 45,
+    "resetDate": "2025-02-01T00:00:00Z"
+  },
+  "message": "Feature is available"
+}
+```
+
+**Error Responses**:
+
+| Status | Error Code | Condition |
+| --- | --- | --- |
+| `403` | `FEATURE_NOT_AVAILABLE` | Feature not available for current tier |
+| `403` | `LICENSE_EXPIRED` | License has expired |
+| `429` | `RATE_LIMIT_EXCEEDED` | Feature usage limit exceeded |
+
+---
+
+### 4.4 Get Upgrade Options
+
+Retrieves available upgrade options for current license.
+
+**`GET /conversion/license/upgrade-options`**
+
+**Auth**: Yes
+
+**Success Response** — `200 OK`:
+
+```json
+{
+  "currentTier": "STARTER",
+  "availableUpgrades": [
+    {
+      "fromTier": "STARTER",
+      "toTier": "PRO",
+      "price": 29,
+      "currency": "USD",
+      "billingCycle": "monthly",
+      "discount": 0,
+      "benefits": [
+        "3,000 builds (50/month)",
+        "5 year duration",
+        "Priority support",
+        "Advanced features",
+        "Cross-platform builds"
+      ],
+      "migrationPath": "automatic",
+      "preservesData": true
+    },
+    {
+      "fromTier": "STARTER",
+      "toTier": "LIFETIME",
+      "price": 299,
+      "currency": "USD",
+      "billingCycle": "once",
+      "discount": 10,
+      "benefits": [
+        "Unlimited builds",
+        "Lifetime access",
+        "All features",
+        "Priority support"
+      ],
+      "migrationPath": "automatic",
+      "preservesData": true
+    }
+  ]
+}
+```
+
+---
+
+### 4.5 Initiate License Upgrade
+
+Starts the license upgrade process.
+
+**`POST /conversion/license/upgrade`**
+
+**Auth**: Yes
+
+**Request Body**:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `targetTier` | `string` | Yes | Target license tier |
+| `paymentMethod` | `string` | Yes | Payment method ID |
+| `billingCycle` | `string` | No | Billing cycle (monthly/yearly/once) |
+| `promoCode` | `string` | No | Promotional code |
+
+**Success Response** — `200 OK`:
+
+```json
+{
+  "upgradeId": "uuid-string",
+  "status": "PENDING_PAYMENT",
+  "fromTier": "STARTER",
+  "toTier": "PRO",
+  "price": 29,
+  "currency": "USD",
+  "paymentUrl": "https://payment-provider.com/pay/uuid-string",
+  "expiresAt": "2025-01-15T11:00:00Z",
+  "estimatedProcessingTime": "2-5 minutes"
+}
+```
+
+---
+
+### 4.6 Complete License Upgrade
+
+Completes the license upgrade after successful payment.
+
+**`POST /conversion/license/upgrade/complete`**
+
+**Auth**: Yes
+
+**Request Body**:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `upgradeId` | `string` | Yes | Upgrade transaction ID |
+| `paymentId` | `string` | Yes | Payment confirmation ID |
+| `paymentSignature` | `string` | Yes | Payment provider signature |
+
+**Success Response** — `200 OK`:
+
+```json
+{
+  "upgradeId": "uuid-string",
+  "status": "COMPLETED",
+  "newTier": "PRO",
+  "previousTier": "STARTER",
+  "upgradedAt": "2025-01-15T10:45:00Z",
+  "expiresAt": "2030-01-15T23:59:59Z",
+  "buildsAllowed": 3000,
+  "featuresUnlocked": [
+    "screenCaptureProtection",
+    "customWatermark",
+    "keyBindings",
+    "offlineCache"
+  ],
+  "migrationSummary": {
+    "projectsMigrated": 3,
+    "dataPreserved": true,
+    "downtime": "30 seconds"
+  }
+}
+```
+
+---
+
+### 4.7 Check Feature Availability
+
+Checks if a specific feature is available for the current license tier.
+
+**`GET /conversion/license/features/{featureId}/availability`**
+
+**Auth**: Yes
+
+**Path Parameters**:
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `featureId` | `string` | Feature identifier |
+
+**Success Response** — `200 OK`:
+
+```json
+{
+  "featureId": "screenCaptureProtection",
+  "available": true,
+  "tier": "PRO",
+  "description": "Prevent screenshots and screen recordings",
+  "restrictions": {
+    "maxUsage": null,
+    "requiresPayment": false,
+    "availableInTrial": false
+  },
+  "configuration": {
+    "supportedOS": ["WINDOWS", "LINUX", "MACOS"],
+    "requiresRestart": false,
+    "userConfigurable": true
+  }
+}
+```
+
+---
+
+### 4.8 Get License Restrictions
+
+Retrieves all current license restrictions and limits.
+
+**`GET /conversion/license/restrictions`**
+
+**Auth**: Yes
+
+**Success Response** — `200 OK`:
+
+```json
+{
+  "tier": "PRO",
+  "expiresAt": "2025-12-31T23:59:59Z",
+  "restrictions": {
+    "projects": {
+      "maxActive": 10,
+      "current": 3,
+      "remaining": 7
+    },
+    "builds": {
+      "maxPerMonth": 50,
+      "usedThisMonth": 12,
+      "remaining": 38,
+      "totalUsed": 45
+    },
+    "storage": {
+      "maxFileSize": 100,
+      "unit": "MB"
+    },
+    "features": {
+      "restrictedInTrial": [
+        "screenCaptureProtection",
+        "customWatermark",
+        "keyBindings"
+      ],
+      "premiumOnly": [
+        "fileSystemAccess",
+        "globalHotkeys"
+      ]
+    },
+    "os": {
+      "supported": ["WINDOWS", "LINUX", "MACOS"],
+      "crossPlatformBuilds": true
+    },
+    "api": {
+      "rateLimitPerMinute": 100,
+      "concurrentBuilds": 3
+    }
+  }
+}
+```
+
+---
+
+### 4.9 Refresh License Cache
+
+Refreshes the license cache for the current user.
+
+**`POST /conversion/license/refresh`**
+
+**Auth**: Yes
+
+**Success Response** — `200 OK`:
+
+```json
+{
+  "message": "License cache refreshed",
+  "previousCacheExpiry": "2025-01-15T10:30:00Z",
+  "newCacheExpiry": "2025-01-15T11:30:00Z",
+  "changes": {
+    "tierUpdated": false,
+    "featuresUpdated": false,
+    "restrictionsUpdated": false
+  }
+}
+```
+
+---
 | `/user/**` | `lb://user-service` | `/user` stripped (StripPrefix=1) | 8081 |
 | `/conversion/**` | `lb://conversion-service` | `/conversion` stripped (StripPrefix=1) | 8082 |
 
