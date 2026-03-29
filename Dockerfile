@@ -48,6 +48,7 @@ COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
 
 # Copy entrypoint
 COPY deploy/entrypoint.sh /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Copy backend jars

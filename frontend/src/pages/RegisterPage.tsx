@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { User, Mail, Lock, Phone, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { FcGoogle } from 'react-icons/fc';
 import { useAuth } from '../hooks/useAuth';
 
 export default function RegisterPage() {
@@ -9,7 +10,8 @@ export default function RegisterPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { register } = useAuth();
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const { register, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
 
   const update = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -59,6 +61,38 @@ export default function RegisterPage() {
               <p className="text-sm text-green-300">Account created! Redirecting to login...</p>
             </motion.div>
           )}
+
+          <button
+            onClick={async () => {
+              setError('');
+              setGoogleLoading(true);
+              try {
+                await loginWithGoogle();
+                navigate('/dashboard');
+              } catch (err: any) {
+                setError(err.message || 'Google sign-in failed.');
+              } finally {
+                setGoogleLoading(false);
+              }
+            }}
+            disabled={loading || googleLoading || success}
+            className="glass-card w-full flex items-center justify-center gap-3 py-2 px-4 rounded-lg hover:opacity-90 transition mb-4"
+          >
+            {googleLoading ? (
+              <Loader2 className="animate-spin w-5 h-5 text-white/70" />
+            ) : (
+              <>
+                <FcGoogle className="w-5 h-5" />
+                <span className="text-sm">Continue with Google</span>
+              </>
+            )}
+          </button>
+
+          <div className="flex items-center gap-2 mb-6">
+            <hr className="flex-1 border-white/10" />
+            <span className="text-xs text-white/30 uppercase tracking-widest">or email</span>
+            <hr className="flex-1 border-white/10" />
+          </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {[

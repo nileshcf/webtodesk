@@ -31,6 +31,11 @@ public class AuthController {
         return ResponseEntity.ok(authService.refreshToken(request));
     }
 
+    @PostMapping("/google")
+    public ResponseEntity<LoginResponse> googleAuth(@RequestBody GoogleAuthRequest request) {
+        return ResponseEntity.ok(authService.googleAuth(request));
+    }
+
     @PostMapping("/logout")
     public ResponseEntity<LogoutResponse> logout(
             @RequestHeader("X-User-Email") String email,
