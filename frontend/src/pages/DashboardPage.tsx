@@ -3,13 +3,57 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Globe, Monitor, Trash2, Download, Loader2,
   ExternalLink, X, AlertCircle, CheckCircle2, Sparkles, Rocket, Shield,
-  Package, FileDown, History, Zap
+  Package, FileDown, History, Zap, Lock, TriangleAlert
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { conversionApi } from '../services/api';
 import type { ConversionProject, ConversionStats, ElectronConfig, LicenseTier } from '../types';
 import ProjectWizard, { type WizardData } from '../components/ProjectWizard';
 import BuildDashboard from '../components/BuildDashboard';
+
+// ─── Expiry helpers ──────────────────────────────────────────────────────────
+
+function computeExpiry(licenseExpiresAt: string | null): {
+  isExpired: boolean;
+  daysLeft: number | null;
+  level: 'ok' | 'info' | 'warning' | 'critical' | 'expired';
+} {
+  if (!licenseExpiresAt) return { isExpired: false, daysLeft: null, level: 'ok' };
+  const msLeft = new Date(licenseExpiresAt).getTime() - Date.now();
+  const daysLeft = Math.ceil(msLeft / 86_400_000);
+  if (daysLeft <= 0) return { isExpired: true, daysLeft: 0, level: 'expired' };
+  if (daysLeft <= 3)  return { isExpired: false, daysLeft, level: 'critical' };
+  if (daysLeft <= 7)  return { isExpired: false, daysLeft, level: 'warning' };
+  if (daysLeft <= 14) return { isExpired: false, daysLeft, level: 'info' };
+  return { isExpired: false, daysLeft, level: 'ok' };
+}
+
+const EXPIRY_STYLE = {
+  ok:       { bar: '', text: '', icon: null },
+  info:     { bar: 'bg-accent-blue/10 border-accent-blue/20',   text: 'text-accent-blue',   icon: TriangleAlert },
+  warning:  { bar: 'bg-accent-orange/10 border-accent-orange/20', text: 'text-accent-orange', icon: TriangleAlert },
+  critical: { bar: 'bg-red-500/10 border-red-500/20',           text: 'text-red-400',       icon: AlertCircle },
+  expired:  { bar: 'bg-red-500/15 border-red-500/30',           text: 'text-red-400',       icon: Lock },
+} as const;
+
+function LicenseExpiredBanner({ expiresAt }: { expiresAt: string }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex items-start gap-3 p-4 rounded-2xl mb-6 bg-red-500/10 border border-red-500/25 ring-1 ring-red-500/10"
+    >
+      <Lock size={16} className="text-red-400 flex-shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-red-300">License expired</p>
+        <p className="text-xs text-red-400/70 mt-0.5">
+          Your license expired on {new Date(expiresAt).toLocaleDateString()}. New builds and project creation are blocked.
+          {' '}<span className="text-red-300 underline cursor-pointer">Upgrade to continue →</span>
+        </p>
+      </div>
+    </motion.div>
+  );
+}
 
 const TIER_META: Record<LicenseTier, { label: string; color: string; bg: string; ring: string }> = {
   TRIAL:    { label: 'Trial',    color: 'text-white/50',       bg: 'bg-white/[0.05]',       ring: 'ring-white/10' },
@@ -23,49 +67,63 @@ function TierQuotaBanner({ stats }: { stats: ConversionStats }) {
   const used = stats.buildsAllowed - stats.buildsRemaining;
   const pct = stats.buildsAllowed > 0 ? Math.min(100, (used / stats.buildsAllowed) * 100) : 0;
   const quotaColor = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-accent-orange' : 'bg-accent-blue';
+  const expiry = computeExpiry(stats.licenseExpiresAt);
+  const expiryStyle = EXPIRY_STYLE[expiry.level];
+  const ExpiryIcon = expiryStyle.icon;
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.03 }}
-      className="glass-card p-4 sm:p-5 mb-6 flex flex-col sm:flex-row sm:items-center gap-4"
+      className="glass-card p-4 sm:p-5 mb-6"
     >
-      {/* Tier badge */}
-      <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl ring-1 ${meta.bg} ${meta.ring} flex-shrink-0`}>
-        <Zap size={13} className={meta.color} />
-        <span className={`text-xs font-semibold tracking-wide uppercase ${meta.color}`}>{meta.label}</span>
+      <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+        {/* Tier badge */}
+        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl ring-1 ${meta.bg} ${meta.ring} flex-shrink-0`}>
+          <Zap size={13} className={meta.color} />
+          <span className={`text-xs font-semibold tracking-wide uppercase ${meta.color}`}>{meta.label}</span>
+        </div>
+
+        {/* Quota bar */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs text-white/40">Builds used</span>
+            <span className="text-xs font-medium text-white/60">
+              {used}
+              {stats.buildsAllowed < 9999 ? ` / ${stats.buildsAllowed}` : ' (unlimited)'}
+            </span>
+          </div>
+          <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+            <motion.div
+              className={`h-full rounded-full ${quotaColor}`}
+              initial={{ width: 0 }}
+              animate={{ width: `${pct}%` }}
+              transition={{ duration: 0.6, ease: 'easeOut' }}
+            />
+          </div>
+        </div>
+
+        {/* Project count */}
+        <div className="flex items-center gap-3 flex-shrink-0 text-xs text-white/30">
+          <span>{stats.totalProjects} project{stats.totalProjects !== 1 ? 's' : ''}</span>
+          {stats.readyProjects > 0 && (
+            <span className="text-accent-green">{stats.readyProjects} ready</span>
+          )}
+        </div>
       </div>
 
-      {/* Quota bar */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs text-white/40">Builds used</span>
-          <span className="text-xs font-medium text-white/60">
-            {used}
-            {stats.buildsAllowed < 9999 ? ` / ${stats.buildsAllowed}` : ' (unlimited)'}
+      {/* Expiry warning row */}
+      {expiry.level !== 'ok' && ExpiryIcon && (
+        <div className={`flex items-center gap-2 mt-3 px-3 py-2 rounded-xl border ${expiryStyle.bar}`}>
+          <ExpiryIcon size={13} className={`${expiryStyle.text} flex-shrink-0`} />
+          <span className={`text-xs ${expiryStyle.text}`}>
+            {expiry.level === 'expired'
+              ? `License expired · builds and new projects are blocked`
+              : `License expires in ${expiry.daysLeft} day${expiry.daysLeft !== 1 ? 's' : ''} · upgrade to keep building`}
           </span>
         </div>
-        <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
-          <motion.div
-            className={`h-full rounded-full ${quotaColor}`}
-            initial={{ width: 0 }}
-            animate={{ width: `${pct}%` }}
-            transition={{ duration: 0.6, ease: 'easeOut' }}
-          />
-        </div>
-      </div>
-
-      {/* Project count */}
-      <div className="flex items-center gap-3 flex-shrink-0 text-xs text-white/30">
-        <span>{stats.totalProjects} project{stats.totalProjects !== 1 ? 's' : ''}</span>
-        {stats.readyProjects > 0 && (
-          <span className="text-accent-green">{stats.readyProjects} ready</span>
-        )}
-        {stats.licenseExpiresAt && (
-          <span className="text-white/20">Expires {new Date(stats.licenseExpiresAt).toLocaleDateString()}</span>
-        )}
-      </div>
+      )}
     </motion.div>
   );
 }
@@ -302,6 +360,8 @@ export default function DashboardPage() {
     URL.revokeObjectURL(url);
   };
 
+  const isExpired = stats ? computeExpiry(stats.licenseExpiresAt).isExpired : false;
+
   const statusColors: Record<string, string> = {
     DRAFT: 'bg-white/10 text-white/50',
     READY: 'bg-accent-green/10 text-accent-green',
@@ -324,7 +384,14 @@ export default function DashboardPage() {
             </h1>
             <p className="text-sm text-white/40">Manage your website-to-desktop conversions</p>
           </div>
-          <button onClick={() => { setShowForm(!showForm); setEditingProject(null); }} className="btn-accent flex items-center gap-2 shadow-lg shadow-accent-blue/20">
+          <button
+            onClick={() => { if (!isExpired) { setShowForm(!showForm); setEditingProject(null); } }}
+            disabled={isExpired}
+            className={`btn-accent flex items-center gap-2 shadow-lg shadow-accent-blue/20 ${
+              isExpired ? 'opacity-40 cursor-not-allowed' : ''
+            }`}
+            title={isExpired ? 'License expired — upgrade to create new projects' : undefined}
+          >
             {showForm && !editingProject ? <X size={16} /> : <Plus size={16} />}
             {showForm && !editingProject ? 'Cancel' : 'New Conversion'}
           </button>
@@ -433,6 +500,11 @@ export default function DashboardPage() {
           )}
         </AnimatePresence>
 
+        {/* License expired banner */}
+        {isExpired && stats?.licenseExpiresAt && (
+          <LicenseExpiredBanner expiresAt={stats.licenseExpiresAt} />
+        )}
+
         {/* Projects List */}
         {loading ? (
           <div className="grid gap-4">
@@ -514,8 +586,12 @@ export default function DashboardPage() {
                       </button>
                     ) : (
                       <button
-                        onClick={() => { setEditingProject(project); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                        className="btn-ghost !py-2 !px-4 !text-xs flex items-center gap-1.5 hover:bg-white/10"
+                        onClick={() => { if (!isExpired) { setEditingProject(project); window.scrollTo({ top: 0, behavior: 'smooth' }); } }}
+                        disabled={isExpired}
+                        className={`btn-ghost !py-2 !px-4 !text-xs flex items-center gap-1.5 hover:bg-white/10 ${
+                          isExpired ? 'opacity-40 cursor-not-allowed' : ''
+                        }`}
+                        title={isExpired ? 'License expired — upgrade to build' : undefined}
                       >
                         <Package size={13} /> Build
                       </button>
