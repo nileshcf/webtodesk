@@ -4,6 +4,44 @@ All notable changes to this project are documented in this file.
 
 ---
 
+## [1.7.0] - 2026-03-29 — Docker Build Pipeline Hardening & noexec tmpfs Fix
+
+### Overview
+
+Resolved the persistent `electron-builder failed with exit code 126 / sh: 1: electron-builder: Permission denied` error that occurred every time a build job was triggered inside the Docker container. Root cause: Docker mounts tmpfs volumes with the `noexec` flag by default, blocking `exec()` syscalls on any file living on the tmpfs — regardless of execute-bit permissions. The build workspace (`/tmp/webtodesk-builds`) is a tmpfs mount, so `npx electron-builder` could never execute the `node_modules/.bin/electron-builder` symlink. The previous `chmod +x` attempt was a no-op because permissions were never the problem.
+
+### Fixed
+
+- **`docker-compose.yml`**: Added `exec` option to the tmpfs mount (`/tmp/webtodesk-builds:mode=1777,size=1500m,exec`). This removes the `noexec` kernel restriction so that scripts and binaries installed by npm inside the workspace can be executed normally.
+- **`BuildService.java`**: Replaced `npx electron-builder` with a two-path invocation strategy:
+  - **Linux/Docker**: New `resolveNodeBinEntry(workspace, "electron-builder")` helper resolves the `.bin/electron-builder` symlink to its real JS target path, then runs `node <resolved-path> --linux --publish=never`. Node.js reads the JS file via `read()` syscall (not `exec()`), so it is entirely immune to `noexec` mount restrictions — this is the belt-and-suspenders fix that works on any deployment regardless of mount flags.
+  - **Windows**: Falls back to the original `npx electron-builder` invocation because Windows NTFS has no `noexec` concept, and `.bin/electron-builder` on Windows is a POSIX shell script that Node.js cannot parse.
+- **`BuildService.java`**: Removed the incorrect `chmod -R +x node_modules/.bin/` step added in v1.6.1 — it was solving the wrong problem (execute-bit permissions were already correct; the real block was the noexec mount flag).
+
+### Pre-flight Verification (run before image rebuild)
+
+- **83/83 unit tests pass** after all code changes.
+- **Wine 6.0.3** (wine32 + wine64 + i386) verified functional in container — Windows `.exe` builds unaffected (Wine reads PE files via `read()`, not Linux `exec()`).
+- **`wineboot -u`** exits 0 inside container with `WINEPREFIX=/tmp/wine-test-prefix`.
+- **`node cli.js --win` flag** confirmed working via `--help` probe — node invocation is equivalent to npx for all build targets.
+- **tmpfs exec verified**: wrote and executed a test script from `/tmp/webtodesk-builds` — confirmed `exec` flag took effect.
+
+### Diagnosed
+
+The previous `chmod` workaround (v1.6.1) was a red herring. Full diagnosis:
+1. `node_modules/.bin/electron-builder` → symlink → `../electron-builder/cli.js` — permissions were `-rwxr-xr-x` (correct) before and after chmod.
+2. `npx electron-builder` → npx spawns a child process → OS calls `exec()` on the file at `/tmp/webtodesk-builds/.../node_modules/electron-builder/cli.js`.
+3. Kernel checks mount flags for the filesystem containing that path → finds `noexec` → returns `EACCES` → exit 126.
+4. Fix: remove `noexec` from the mount AND bypass `exec()` entirely by using `node`.
+
+### Verified
+
+- Container healthy at `http://localhost:7860` after rebuild.
+- `/proc/mounts` shows `tmpfs /tmp/webtodesk-builds tmpfs rw,nosuid,nodev,relatime,...` (no `noexec`).
+- Test script executed from tmpfs returns exit 0.
+
+---
+
 ## [1.6.0] - 2026-03-29 — Docker Monolith Fix & Login 500 Resolution
 
 ### Overview

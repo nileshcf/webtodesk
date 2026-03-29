@@ -22,7 +22,7 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 ### Current
 
 - **Website-to-Desktop Conversion** — Paste any URL and generate a ready-to-build Electron project
-- **Server-Side .exe Building** — Full local execution of `npm install` and `electron-builder` to generate `.exe` files and stream real-time logs via SSE
+- **Server-Side .exe / .deb Building** — Full local execution of `npm install` and `electron-builder` inside Docker to generate `.exe` (Windows via Wine) or `.deb` (Linux) files and stream real-time logs via SSE
 - **Cloud Object Storage** — Automatically uploads generated artifacts to Cloudflare R2 for secure, scalable distribution
 - **Licensing System** — Four-tier licensing model (Trial/Starter/Pro/Lifetime) with build limits and expiry management
 - **OS-Specific Builds** — Cross-platform builds for Windows (.exe/.msi), Linux (.AppImage/.deb/.rpm), and macOS (.dmg/.zip)
@@ -48,8 +48,10 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 - ⚠️ **Password Reset** — Endpoint references exist but no implementation
 - ⚠️ **Admin Panel** — Role enum exists (ROLE_ADMIN) but no admin UI or endpoints
 - ⚠️ **File Upload** — Icon file upload (currently accepts filename string only)
-- ⚠️ **CI/CD Pipeline** — No GitHub Actions or GitLab CI configuration
-- ⚠️ **Monitoring & Observability** — Health checks, metrics, structured logging
+- ⚠️ **CI/CD Pipeline** — GitHub Actions workflow pending (Week 4)
+- ⚠️ **VersionUpgradeService** — Automatic version upgrade with license persistence (Week 4)
+- ⚠️ **OpenAPI Docs** — Springdoc OpenAPI integration pending (Week 4)
+- ⚠️ **Monitoring & Observability** — Prometheus metrics, structured logging
 
 ---
 
@@ -235,46 +237,64 @@ These scripts support both interactive use (for humans) and deterministic non-in
 | `SPRING_DATA_MONGODB_URI` | conversion-service | Yes | MongoDB connection URI | `mongodb://localhost:27017/webtodesk` |
 | `EUREKA_CLIENT_SERVICEURL_DEFAULTZONE` | all services | Yes | Eureka server URL | `http://localhost:8761/eureka/` |
 | `SPRING_PROFILES_ACTIVE` | all services | No | Active Spring profile | `dev` / `prod` |
-| `USER_SERVICE_DB_PASSWORD` | user-service (prod) | Prod only | Production DB password | `****` |
+| `R2_ACCOUNT_ID` | conversion-service | Yes (prod) | Cloudflare R2 account ID | `b34ccabf...` |
+| `R2_ACCESS_KEY_ID` | conversion-service | Yes (prod) | R2 access key | `...` |
+| `R2_SECRET_ACCESS_KEY` | conversion-service | Yes (prod) | R2 secret key | `...` |
+| `R2_BUCKET` | conversion-service | No | R2 bucket name | `webtodesk-builds` |
+| `R2_PUBLIC_URL` | conversion-service | No | R2 public CDN URL | `https://pub-xxx.r2.dev` |
+| `DEVELOPMENT_BUILD` | conversion-service | No | Bypass license validation + tier gating | `true` |
+| `WEBTODESK_BUILD_TARGET_PLATFORM` | conversion-service | No | Override build target: `auto`/`win`/`linux`/`mac` | `auto` |
+| `BUILD_OUTPUT_DIR` | conversion-service | No | Workspace dir for electron builds | `/tmp/webtodesk-builds` |
 
-> ⚠️ **No `.env.example` file currently exists in the repository.** This is a gap that should be addressed.
+> Copy `.env` to configure all secrets. `DEVELOPMENT_BUILD=true` is set in `.env` for the Docker container to bypass license checks during development.
 
 ---
 
 ## Running with Docker
 
 ```bash
-# Build and start all services
-docker-compose up --build
+# Build and start the monolith container (all services in one image)
+docker compose build --build-arg NODE_MAJOR=20 --build-arg ELECTRON_VERSION=38.2.2 --build-arg ELECTRON_BUILDER_VERSION=26.0.12
+docker compose up -d
 
-# Services will be available at:
-#   Discovery:  http://localhost:8761
-#   Gateway:    http://localhost:8080
-#   User:       http://localhost:8081
-#   Converter:  http://localhost:8082
+# Or use the helper scripts (Windows)
+.\docker-rebuild.ps1
+.\docker-start.ps1 -StopExisting
+
+# App is available at:
+#   Frontend + API:  http://localhost:7860
 ```
 
-> ⚠️ **Note**: The current `docker-compose.yml` does not include PostgreSQL, MongoDB, or Redis containers. You must provide external database instances or add database services to the compose file.
+> **Monolith mode**: All four Spring Boot services + React frontend run in a single container behind Nginx on port 7860. Cloud services (Neon PostgreSQL, Upstash Redis, MongoDB Atlas, Cloudflare R2) are injected via `.env` — no local database containers needed.
 
-> ⚠️ **Note**: Dockerfiles are missing for `discovery-service` and `conversion-service`. Only `api-gateway` and `user-service` have Dockerfiles.
+> **tmpfs build workspace**: The build workspace (`/tmp/webtodesk-builds`) is mounted as `tmpfs` with `exec` for maximum I/O speed during `npm install` and `electron-builder` execution. Docker's default `noexec` tmpfs flag is explicitly overridden — this is required for electron-builder to run.
+
+> **Windows builds via Wine**: The container includes Wine 6 (wine32 + wine64 + i386 arch) for cross-compiling Windows `.exe` installers on Linux.
 
 ---
 
 ## Running Tests
 
-> ⚠️ **No tests currently exist in the codebase.** This is a critical gap. The project has no unit tests, integration tests, or end-to-end tests.
+**83 tests passing** across `conversion-service`.
 
-When tests are added:
+```powershell
+# Windows (PowerShell) — conversion-service full suite
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-17"
+.\mvnw.cmd clean test -pl conversion-service "-DMONGODB_URI=mongodb://localhost:27017/test"
 
-```bash
-# Backend (Maven)
-./mvnw test                           # Run all module tests
-./mvnw test -pl user-service          # Run user-service tests only
-
-# Frontend
-cd frontend
-npm test                              # (test script not yet configured)
+# All modules
+.\mvnw.cmd test
 ```
+
+| Test Class | Count | Scope |
+|---|---|---|
+| `ConversionControllerTest` | 10 | Controller layer |
+| `LicenseControllerTest` | 12 | License endpoints |
+| `ConversionServiceTest` | 18 | Service + entity |
+| `LicenseServiceTest` | 17 | Tier validation, quota |
+| `ModuleRegistryTest` | 19 | Module tier gating |
+| `TemplateEngineTest` | 7 | Mustache rendering |
+| **Total** | **83** | **All passing** |
 
 ---
 

@@ -12,8 +12,8 @@ description: >
   **Week 1 (Foundation + R2 + Local Builds) is COMPLETE as of 2026-03-27.**
   **Week 2 (Licensing + Build Queue + Frontend Components) is COMPLETE. All 57 tests passed.**
   **Week 3 (Template Engine + Module System + Build Metrics) is COMPLETE as of 2026-03-28. All 83 tests pass.**
-  **Week 4 (Toggleable Modules + Dev Build + Dashboard) is IN PROGRESS as of 2026-03-29. All 83 tests still pass.**
-  Current week: Week 4. Remaining: VersionUpgradeService, OpenAPI docs, production observability.
+  **Week 4 (Toggleable Modules + Dev Build + Dashboard + Docker Build Hardening) is IN PROGRESS as of 2026-03-29. All 83 tests still pass.**
+  Current week: Week 4. Remaining: VersionUpgradeService, GitHub Actions CI, OpenAPI docs.
   Payment/subscription integration is explicitly deferred until core build/test flows are stable.
   Activates for: webtodesk, conversion service, electron app builder, url to desktop, desktop
   wrapper, electron template, build pipeline, conversion project, R2, cloudflare, artifact storage.
@@ -194,7 +194,10 @@ Conversion Service (async thread — buildExecutor)
   Step 1  PREPARING        → create temp workspace in BUILD_OUTPUT_DIR
   Step 2  WRITING_FILES    → write config.js, main.js, preload.js, package.json
   Step 3  INSTALLING       → npm install --no-audit --no-fund
-  Step 4  BUILDING         → npx electron-builder --{win|linux|mac} --publish=never
+  Step 4  BUILDING         → node <resolved .bin/electron-builder entry> --{win|linux|mac} --publish=never
+                             (Linux/Docker: resolveNodeBinEntry() follows .bin symlink → runs via node read(),
+                              bypasses noexec tmpfs mount restriction — Docker's default)
+                             (Windows: falls back to npx electron-builder)
   Step 5  FINDING_ARTIFACT → walk dist/ for installer by target extensions
   Step 6  UPLOADING_R2     → upload to R2 key: builds/{email}/{id}/{filename}
           → set status=READY, buildArtifactPath=R2 public URL
@@ -235,9 +238,16 @@ services:
     ports: ["7860:7860"]
     env_file: [.env]
     restart: unless-stopped
+    shm_size: 512m
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    tmpfs:
+      - /tmp/webtodesk-builds:mode=1777,size=1500m,exec   # exec REQUIRED — Docker's default noexec blocks electron-builder
 ```
 
 **Key pitfall:** Do NOT use individual per-service Dockerfiles in docker-compose. The root `Dockerfile` is the monolith — it builds all 4 JARs + React frontend in multi-stage then serves them all from one container via `entrypoint.sh` + nginx.
+
+**Critical: `exec` on tmpfs** — Docker mounts tmpfs with `noexec` by default. Without `exec`, any binary/script residing on the tmpfs (e.g. `node_modules/.bin/electron-builder`) returns `EACCES` / exit 126 when executed. The `exec` option removes this restriction. The `node <entry>` invocation in `BuildService.java` is a belt-and-suspenders fix: Node.js reads JS files via `read()` not `exec()`, making it immune to noexec even if the compose option is ever removed.
 
 **Cloud services used (from `.env`):** Neon PostgreSQL, Upstash Redis, MongoDB Atlas, Cloudflare R2 — no local DB containers needed.
 
@@ -652,17 +662,35 @@ R2 cloud storage, local build orchestration using Node.js & Electron Builder, SS
 - [ ] Build tracking admin dashboard
 ```
 
-### WEEK 4 — PRODUCTION HARDENING + MONITORING (Days 22–30)
+### WEEK 4 — PRODUCTION HARDENING + MONITORING (Days 22–30) 🔄 IN PROGRESS
 
-**Goal**: Production deployment with monitoring, observability, and advanced licensing features.
+**Goal**: Production deployment with monitoring, observability, advanced licensing features, and Docker build pipeline hardening.
 
 ```
+## TASK: Docker Build Pipeline Hardening ✅ COMPLETE (2026-03-29)
+## WEEK: 4
+## SCOPE: docker-compose.yml, BuildService.java
+
+### DONE
+- [x] Root cause identified: Docker mounts tmpfs with noexec by default → exec() blocked on build workspace
+- [x] docker-compose.yml: added exec to /tmp/webtodesk-builds tmpfs mount options
+- [x] BuildService.java: replaced npx invocation with node+resolveNodeBinEntry() on Linux
+      (reads JS via read() syscall — immune to noexec entirely)
+- [x] BuildService.java: added OS-branch — Windows keeps npx, Linux uses node path
+- [x] BuildService.java: removed incorrect chmod +x workaround from v1.6.1
+- [x] BuildService.java: added resolveNodeBinEntry(Path workspace, String binName) helper
+- [x] Pre-flight verified: Wine 6.0.3, wineboot -u, wine32/wine64/i386 all functional
+- [x] Pre-flight verified: node cli.js --win confirmed equivalent to npx for all targets
+- [x] 83/83 tests pass after all changes
+- [x] Image rebuilt, container healthy at http://localhost:7860
+- [x] noexec removal confirmed via /proc/mounts inspection in container
+
 ## TASK: Production Deployment
 ## WEEK: 4
 ## SCOPE: config, docker, deployment
 
 ### TODO
-- [ ] P0 · Create production Docker configurations
+- [x] Create production Docker configurations (monolith Dockerfile complete)
 - [ ] P0 · Implement health checks with detailed status
 - [ ] P0 · Add application metrics and monitoring
 - [ ] P0 · Configure production logging and error tracking
