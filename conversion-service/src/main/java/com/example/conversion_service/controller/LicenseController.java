@@ -2,7 +2,6 @@ package com.example.conversion_service.controller;
 
 import com.example.conversion_service.dto.*;
 import com.example.conversion_service.service.LicenseService;
-import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;

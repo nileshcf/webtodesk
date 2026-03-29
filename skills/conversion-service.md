@@ -129,16 +129,16 @@ Current authoritative implementation:
 | **Service** | `ConversionService.java` | **Hardened** | CRUD + `generateElectronProject()`. Uses `ProjectNotFoundException`. |
 | **Service** | `BuildService.java` | **Week 1+** | Local workspace build. Key methods: `triggerBuild` (async orchestrator), `validateBuildEnvironment` (pre-flight: node/npm probe + disk check), `buildEnvironment` (augmented PATH/HOME/ELECTRON_CACHE map), `getToolVersion` (safe 10s tool probe), `runProcess` (30-min timeout + last-20-line tail log on failure), `resolveBuildTarget` (auto/win/linux/mac via `BuildTarget` enum), `resolveExecutable` (`.cmd` on Windows, bare on Linux). Artifact discovery is extension-aware (.exe/.msi/.AppImage/.deb/.rpm/.dmg/.zip). |
 | **Service** | `R2StorageService.java` | **Week 1** | Upload file/stream, delete, exists, getPublicUrl — uses AWS S3 SDK against R2 |
-| **Controller** | `ConversionController.java` | **Hardened** | CRUD + generate + build trigger (SSE stream) + build status + download redirect |
+| **Controller** | `ConversionController.java` | **Hardened** | CRUD + generate + build trigger (SSE stream) + build status + download redirect + `POST /{id}/version/bump` + `GET /stats` |
 | **Health** | `HealthController.java` | **Week 4** | `GET /conversions/health` — DB ping, uptime, build-queue depth, version |
-| **DTOs** | 6 records/classes | **Hardened** | `CreateConversionRequest`, `UpdateConversionRequest`, `ConversionResponse`, `ElectronConfigResponse`, `BuildStatusResponse`, `ErrorResponse` |
+| **DTOs** | 9 records/classes | **Hardened** | `CreateConversionRequest`, `UpdateConversionRequest`, `ConversionResponse`, `ElectronConfigResponse`, `BuildStatusResponse`, `ErrorResponse`, `VersionBumpRequest`, `VersionBumpResponse`, `ConversionStatsResponse` |
 | **Exceptions** | `exception/` package | **Week 1** | `ProjectNotFoundException`, `GlobalExceptionHandler` (`@RestControllerAdvice`) |
 | **Config** | `R2Properties.java` | **Week 1** | `@ConfigurationProperties(prefix = "webtodesk.r2")` — bucket, keys, endpoint, publicUrl |
 | **Config** | `R2ClientConfig.java` | **Week 1** | S3Client bean configured for Cloudflare R2 (path-style, US_EAST_1 region) |
 | **Config** | `MongoConfig.java` | **Week 1** | `@EnableMongoAuditing` |
 | **Config** | `ConversionSecurityConfig.java` | Stub | Permits all requests (relies on API gateway auth) |
 | **Config** | `application.yml` | **Hardened** | Port 8082, MongoDB, Eureka, R2, workspace config — all via env vars |
-| **Tests** | 195 tests | **Week 4** | Service + Controller unit tests (all passing) |
+| **Tests** | 199 tests | **Week 4** | Service + Controller unit tests (all passing) |
 
 ### 1.2 What's Missing (vs. Target Vision)
 
@@ -160,6 +160,9 @@ Current authoritative implementation:
 | ~~No API documentation (OpenAPI)~~ | **P1** | Week 4 | **DONE** (`springdoc-openapi-starter-webmvc-ui:2.3.0` + `OpenApiConfig` + `@Tag`/`@Operation` on all controllers; Swagger UI at `/conversions/swagger-ui.html`) |
 | ~~No version upgrade system~~ | **P2** | Week 4 | **DONE** (`VersionUpgradeService` + `POST /conversions/{id}/version/bump`; 17 tests) |
 | ~~CI pipeline broken (missing MongoDB service)~~ | **P0** | Week 4 | **DONE** (pipeline.yml: separate jobs — `frontend`, `conversion-service` with mongo:7 service, `backend-compile`; MONGODB_URI env passed) |
+| ~~No tier-based module gating enforcement~~ | **P1** | Week 4 | **DONE** (`ConversionService.validateModuleTierAccess()` throws `LicenseViolationException` → 402 on create/update; `LicenseService.getUserBestTier()`; 4 tests) |
+| ~~No stats/analytics endpoint~~ | **P1** | Week 4 | **DONE** (`GET /conversions/stats` → `ConversionStatsResponse`; per-status project counts, build quota, tier, expiry) |
+| ~~No tier badge / quota UI on dashboard~~ | **P1** | Week 4 | **DONE** (`TierQuotaBanner` in `DashboardPage.tsx` — tier badge, animated quota bar, project count; `ConversionStats` type + `conversionApi.getStats()`) |
 | No license expiry enforcement (blocking screen in UI) | **P2** | Week 5+ | Pending |
 | No OS compatibility matrix (Windows/Linux/Mac) | **P2** | Week 5+ | Pending |
 
