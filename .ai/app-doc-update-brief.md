@@ -1,6 +1,6 @@
 ﻿# App-Level Documentation & Upskilling Update Brief
 
-Generated: 2026-03-30 00:04:37
+Generated: 2026-03-30 00:06:13
 Scope: update project documentation from latest code/runtime changes.
 
 ## Required output files
@@ -12,20 +12,20 @@ Scope: update project documentation from latest code/runtime changes.
 ## Source change inventory
 
 ### frontend
-- [M] frontend/src/hooks/useAuth.tsx (working)
-- [M] frontend/src/pages/LoginPage.tsx (working)
-- [M] frontend/src/pages/RegisterPage.tsx (working)
-- [M] frontend/src/services/api.ts (working)
+- [M] frontend/src/hooks/useAuth.tsx (commit)
+- [M] frontend/src/pages/LoginPage.tsx (commit)
+- [M] frontend/src/pages/RegisterPage.tsx (commit)
+- [M] frontend/src/services/api.ts (commit)
 
 ### root/other
 - [M] .ai/app-doc-update-brief.md (commit)
 
 ### runtime/deploy
-- [M] Dockerfile (working)
+- [M] Dockerfile (commit)
 
 ### user-service
-- [M] user-service/src/main/java/com/example/user_service/config/FirebaseConfig.java (working)
-- [M] user-service/src/main/java/com/example/user_service/service/AuthService.java (working)
+- [M] user-service/src/main/java/com/example/user_service/config/FirebaseConfig.java (commit)
+- [M] user-service/src/main/java/com/example/user_service/service/AuthService.java (commit)
 
 ## Update rules
 1. Reflect implemented behavior only; mark roadmap/deferred items clearly.
