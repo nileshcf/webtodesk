@@ -25,4 +25,4 @@ services:
     # npm install + electron-builder I/O is 3-5x faster on tmpfs.
     # Remove or reduce size if the host has < 2 GB free RAM.
     tmpfs:
-      - /tmp/webtodesk-builds:mode=1777,size=1500m
+      - /tmp/webtodesk-builds:mode=1777,size=1500m,exec

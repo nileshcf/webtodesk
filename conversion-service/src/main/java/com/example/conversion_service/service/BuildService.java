@@ -236,18 +236,6 @@ public class BuildService {
             throw new IOException("npm install failed with exit code " + result.exitCode() + "\n" + result.outputTail());
         }
 
-        // Restore execute bits on .bin/ scripts — npm cache mount (BuildKit --mount=type=cache)
-        // can strip them, causing exit code 126 / "Permission denied" when electron-builder runs.
-        if (!isWindows()) {
-            Path binDir = workspace.resolve("node_modules").resolve(".bin");
-            if (Files.isDirectory(binDir)) {
-                runProcess(project.getId(), workspace, "chmod-bin",
-                        new String[]{"chmod", "-R", "+x", binDir.toAbsolutePath().toString()},
-                        null);
-                log.debug("Restored execute bits on node_modules/.bin/");
-            }
-        }
-
         log.info("npm install completed for '{}'", project.getProjectName());
     }
 
@@ -269,22 +257,42 @@ public class BuildService {
             }
         }
 
-        List<String> args = new ArrayList<>();
-        args.add("electron-builder");
-        args.add("--" + buildTarget.cliValue);
+        // Build platform flags (shared between both execution paths)
+        List<String> flags = new ArrayList<>();
+        flags.add("--" + buildTarget.cliValue);
         if (buildTarget == BuildTarget.WIN && !isWindows()) {
-            args.add("--x64");
+            flags.add("--x64");
         }
-        args.add("--publish=never");
+        flags.add("--publish=never");
         if (electronBuilderDebug) {
-            args.add("--debug");
+            flags.add("--debug");
+        }
+
+        // On Linux/Docker: invoke via 'node <resolved-entry>' to bypass noexec tmpfs restriction.
+        // Docker mounts the build workspace tmpfs with noexec by default; the OS blocks exec()
+        // on noexec mounts but node reads JS with read(), which is not affected by noexec.
+        // On Windows: .bin/electron-builder is a POSIX shell script — node cannot parse it,
+        // so fall back to npx which handles Windows .cmd shims correctly.
+        final String[] ebCommand;
+        if (isWindows()) {
+            List<String> winArgs = new ArrayList<>();
+            winArgs.add("electron-builder");
+            winArgs.addAll(flags);
+            ebCommand = command("npx", winArgs.toArray(new String[0]));
+        } else {
+            String ebEntry = resolveNodeBinEntry(workspace, "electron-builder");
+            log.debug("electron-builder entry point: {}", ebEntry);
+            List<String> nodeArgs = new ArrayList<>();
+            nodeArgs.add(ebEntry);
+            nodeArgs.addAll(flags);
+            ebCommand = command("node", nodeArgs.toArray(new String[0]));
         }
 
         ProcessResult result = runProcessWithRetries(
                 project.getId(),
                 workspace,
                 "electron-builder",
-                command("npx", args.toArray(new String[0])),
+                ebCommand,
                 envOverrides
         );
 
@@ -621,6 +629,22 @@ public class BuildService {
 
     private String resolveExecutable(String executable) {
         return isWindows() ? executable + ".cmd" : executable;
+    }
+
+    /**
+     * Returns the absolute path to the JS entry-point behind a .bin/ symlink.
+     * Using the resolved path with 'node' bypasses noexec tmpfs restrictions:
+     * node reads JS files (read syscall) rather than exec()-ing them.
+     */
+    private String resolveNodeBinEntry(Path workspace, String binName) throws IOException {
+        Path binLink = workspace.resolve("node_modules").resolve(".bin").resolve(binName);
+        if (!Files.exists(binLink, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException(binName + " not found in node_modules/.bin/ — run npm install first");
+        }
+        if (Files.isSymbolicLink(binLink)) {
+            return binLink.toRealPath().toString();
+        }
+        return binLink.toAbsolutePath().toString();
     }
 
     private BuildTarget resolveBuildTarget() {
