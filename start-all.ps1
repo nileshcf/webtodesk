@@ -107,7 +107,7 @@ $services = @(
     [ordered]@{ Key = "User"; Name = "User Service"; Port = 8081; Path = "user-service"; Type = "maven" },
     [ordered]@{ Key = "Conversion"; Name = "Conversion Service"; Port = 8082; Path = "conversion-service"; Type = "maven" },
     [ordered]@{ Key = "Gateway"; Name = "API Gateway"; Port = 8080; Path = "api-gateway"; Type = "maven" },
-    [ordered]@{ Key = "Frontend"; Name = "React Frontend"; Port = 5173; Path = "frontend"; Type = "npm" }
+    [ordered]@{ Key = "Frontend"; Name = "React Frontend"; Port = 7860; Path = "frontend"; Type = "npm" }
 )
 
 foreach ($svc in $services) {
@@ -173,7 +173,7 @@ if ($OutputJson) {
     if (-not $NoBrowserPrompt -and -not $NonInteractive) {
         $openBrowser = Read-Host "Open frontend in browser? (y/N)"
         if ($openBrowser -eq "y" -or $openBrowser -eq "Y") {
-            Start-Process "http://localhost:5173"
+            Start-Process "http://localhost:7860"
         }
     }
 }
