@@ -55,7 +55,10 @@ When an agent needs to orchestrate local runtime or Docker flows from repo root,
 - `start-all.ps1` — local microservices + frontend startup
 - `docker-rebuild.ps1` — deterministic image rebuild
 - `docker-start.ps1` — deterministic container start
+- `registry-push.ps1` — publish tested image to GHCR or Docker Hub
+- `registry-pull-run.ps1` — pull and run shared registry image for team verification
 - `git-operations.ps1` — git operations in interactive or command mode
+- `ai-doc-sync.ps1` — one-go documentation + skills update brief generator
 
 **Agent mode requirements:**
 
@@ -67,7 +70,10 @@ When an agent needs to orchestrate local runtime or Docker flows from repo root,
 .\start-all.ps1 -NonInteractive -NoBrowserPrompt -OutputJson
 .\docker-rebuild.ps1 -NoCache -RemoveOldImages -PruneDangling -NonInteractive -OutputJson
 .\docker-start.ps1 -StopExisting -KillPortProcess -NonInteractive -OutputJson
+.\registry-push.ps1 -GitHubRepo <github-user-or-org>/webtodesk -BuildFirst -Tag latest -ExtraTags v1.8.0 -RunLogin -NonInteractive -OutputJson
+.\registry-pull-run.ps1 -GitHubRepo <github-user-or-org>/webtodesk -Tag latest -StopExisting -PullAlways -NonInteractive -OutputJson
 .\git-operations.ps1 -Action status -OutputJson
+.\ai-doc-sync.ps1 -SinceRef HEAD~5 -OutputJson
 ```
 
 ### 0.2 Java 17 + Dependency Contract (No Guessing)

@@ -21,7 +21,10 @@ Use these scripts from the repo root for local development, Docker operations, a
 - `start-all.ps1` — start all local services with port readiness checks
 - `docker-rebuild.ps1` — rebuild monolith image with optional cleanup and no-cache mode
 - `docker-start.ps1` — run container with configurable host/container ports
+- `registry-push.ps1` — build/tag/push image to GHCR or Docker Hub for team testing
+- `registry-pull-run.ps1` — pull shared registry image and run directly
 - `git-operations.ps1` — interactive git UI and non-interactive command mode
+- `ai-doc-sync.ps1` — generate one-go app-level doc/skill update brief from git changes
 
 ### AI-First Usage Pattern
 
@@ -33,7 +36,10 @@ Use these scripts from the repo root for local development, Docker operations, a
 .\start-all.ps1 -NonInteractive -NoBrowserPrompt -OutputJson
 .\docker-rebuild.ps1 -NoCache -RemoveOldImages -PruneDangling -NonInteractive -OutputJson
 .\docker-start.ps1 -StopExisting -KillPortProcess -NonInteractive -OutputJson
+.\registry-push.ps1 -GitHubRepo <github-user-or-org>/webtodesk -BuildFirst -Tag latest -ExtraTags v1.8.0 -RunLogin -NonInteractive -OutputJson
+.\registry-pull-run.ps1 -GitHubRepo <github-user-or-org>/webtodesk -Tag latest -StopExisting -PullAlways -NonInteractive -OutputJson
 .\git-operations.ps1 -Action status -OutputJson
+.\ai-doc-sync.ps1 -SinceRef HEAD~5 -OutputJson
 ```
 
 ### Runtime + Dependency Contract (Agents)

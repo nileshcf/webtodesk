@@ -198,7 +198,10 @@ These scripts support both interactive use (for humans) and deterministic non-in
 - `start-all.ps1` — starts all local services with readiness checks
 - `docker-rebuild.ps1` — rebuilds Docker image with cache/no-cache and cleanup options
 - `docker-start.ps1` — starts container on selected ports with optional cleanup of conflicts
+- `registry-push.ps1` — build/tag/push image to GHCR or Docker Hub for team testing
+- `registry-pull-run.ps1` — pull shared registry image and run container directly
 - `git-operations.ps1` — interactive git UI + command-mode actions for automation
+- `ai-doc-sync.ps1` — one-go app-level update brief for `README.md`, `CHANGELOG.md`, `docs/**`, and `skills/**`
 
 #### Quick Human Usage
 
@@ -206,7 +209,10 @@ These scripts support both interactive use (for humans) and deterministic non-in
 .\start-all.ps1
 .\docker-rebuild.ps1 -RemoveOldImages -PruneDangling
 .\docker-start.ps1 -StopExisting -HostPort 7860
+.\registry-push.ps1 -GitHubRepo <github-user-or-org>/webtodesk -BuildFirst -Tag latest -ExtraTags v1.8.0 -RunLogin
+.\registry-pull-run.ps1 -GitHubRepo <github-user-or-org>/webtodesk -Tag latest -StopExisting
 .\git-operations.ps1 -Action interactive
+.\ai-doc-sync.ps1 -SinceRef HEAD~3
 ```
 
 #### AI / Non-Interactive Usage
@@ -215,9 +221,13 @@ These scripts support both interactive use (for humans) and deterministic non-in
 .\start-all.ps1 -NonInteractive -NoBrowserPrompt -OutputJson
 .\docker-rebuild.ps1 -NoCache -RemoveOldImages -PruneDangling -NonInteractive -OutputJson
 .\docker-start.ps1 -StopExisting -KillPortProcess -NonInteractive -OutputJson
+.\registry-push.ps1 -GitHubRepo <github-user-or-org>/webtodesk -BuildFirst -Tag latest -ExtraTags v1.8.0 -RunLogin -NonInteractive -OutputJson
+.\registry-pull-run.ps1 -GitHubRepo <github-user-or-org>/webtodesk -Tag latest -StopExisting -PullAlways -NonInteractive -OutputJson
 .\git-operations.ps1 -Action status -OutputJson
 .\git-operations.ps1 -Action switch -Branch develop -NonInteractive -OutputJson
 .\git-operations.ps1 -Action merge -TargetBranch feature/my-change -NonInteractive -OutputJson
+.\ai-doc-sync.ps1 -SinceRef HEAD~5 -OutputJson
+.\ai-doc-sync.ps1 -OnlyWorkingTree -RunAgent -AgentCommand "claude -p {PROMPT_FILE}" -NonInteractive
 ```
 
 > Tip: prefer `-OutputJson` for machine-readable logs/results in agent workflows.
@@ -270,6 +280,18 @@ docker compose up -d
 > **tmpfs build workspace**: The build workspace (`/tmp/webtodesk-builds`) is mounted as `tmpfs` with `exec` for maximum I/O speed during `npm install` and `electron-builder` execution. Docker's default `noexec` tmpfs flag is explicitly overridden — this is required for electron-builder to run.
 
 > **Windows builds via Wine**: The container includes Wine 6 (wine32 + wine64 + i386 arch) for cross-compiling Windows `.exe` installers on Linux.
+
+### Share One Image for Team Testing
+
+```powershell
+# Publisher machine: build + push to registry (GHCR shown)
+.\registry-push.ps1 -GitHubRepo <github-user-or-org>/webtodesk -BuildFirst -Tag latest -ExtraTags v1.8.0 -RunLogin
+
+# Tester machine: pull + run the exact same image
+.\registry-pull-run.ps1 -GitHubRepo <github-user-or-org>/webtodesk -Tag latest -StopExisting -PullAlways
+```
+
+> Use immutable version tags (for example, `v1.8.0`) for reproducible team testing, and keep `latest` as a convenience tag.
 
 ---
 
