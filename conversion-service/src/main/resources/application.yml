@@ -52,6 +52,26 @@ springdoc:
     display-request-duration: true
   show-actuator: false
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+      base-path: /actuator
+  endpoint:
+    prometheus:
+      enabled: true
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        builds.duration: true
+      percentiles:
+        builds.duration: 0.5,0.75,0.95,0.99
+
 logging:
   level:
     root: WARN

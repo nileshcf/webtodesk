@@ -60,6 +60,16 @@
             <version>2.3.0</version>
         </dependency>
 
+        <!-- Micrometer + Prometheus metrics -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
         <!-- Jackson JSR-310 (Instant serialisation) -->
         <dependency>
             <groupId>com.fasterxml.jackson.datatype</groupId>

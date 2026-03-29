@@ -104,8 +104,10 @@ public class BuildService {
         repository.save(project);
         emitProgress(projectId, "PREPARING", "Preparing build workspace...");
 
-        buildQueueService.recordBuildStarted(projectId,
-                project.getTier() != null ? project.getTier() : com.example.conversion_service.entity.ConversionProject.LicenseTier.TRIAL);
+        com.example.conversion_service.entity.ConversionProject.LicenseTier effectiveTier =
+                project.getTier() != null ? project.getTier() : com.example.conversion_service.entity.ConversionProject.LicenseTier.TRIAL;
+        buildQueueService.recordBuildStarted(projectId, effectiveTier);
+        buildMetricsService.recordBuildStarted(effectiveTier, resolveBuildTarget(project).cliValue);
 
         Path workspace = null;
         boolean buildFailed = false;
