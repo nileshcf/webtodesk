@@ -3,7 +3,9 @@ package com.example.conversion_service.controller;
 import com.example.conversion_service.dto.BuildRecordResponse;
 import com.example.conversion_service.dto.BuildStatusResponse;
 import com.example.conversion_service.dto.ConversionResponse;
+import com.example.conversion_service.dto.CreateConversionRequest;
 import com.example.conversion_service.dto.ModuleInfoResponse;
+import com.example.conversion_service.dto.QuickBuildRequest;
 import com.example.conversion_service.entity.ConversionProject;
 import com.example.conversion_service.entity.ConversionProject.ConversionStatus;
 import com.example.conversion_service.entity.ConversionProject.LicenseTier;
@@ -14,6 +16,7 @@ import com.example.conversion_service.service.ConversionService;
 import com.example.conversion_service.service.ModuleRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -39,6 +42,9 @@ public class BuildController {
     private final BuildQueueService buildQueueService;
     private final BuildMetricsService buildMetricsService;
     private final ModuleRegistry moduleRegistry;
+
+    @Value("${webtodesk.build.development-build:false}")
+    private boolean developmentBuild;
 
     /**
      * POST /build/trigger — trigger a build for a project.
@@ -207,6 +213,81 @@ public class BuildController {
         return ResponseEntity.status(302)
                 .location(URI.create(downloadUrl))
                 .build();
+    }
+
+    /**
+     * POST /build/quick-build — DEV ONLY (requires DEVELOPMENT_BUILD=true).
+     * Creates a project and immediately triggers a build in one request.
+     * Accepts: projectName, websiteUrl, appTitle, iconFile, modules, platform, userEmail.
+     * Returns: projectId, pollUrl, progressUrl, availableModules.
+     */
+    @PostMapping("/quick-build")
+    public ResponseEntity<Map<String, Object>> quickBuild(
+            @RequestBody QuickBuildRequest req,
+            @RequestHeader(value = "X-User-Email", required = false) String headerEmail) {
+
+        if (!developmentBuild) {
+            return ResponseEntity.status(403).body(Map.of(
+                    "error", "quick-build is only available when DEVELOPMENT_BUILD=true",
+                    "hint", "Set DEVELOPMENT_BUILD=true in your .env or application.yml"
+            ));
+        }
+
+        String userEmail = (headerEmail != null && !headerEmail.isBlank())
+                ? headerEmail : req.resolvedUserEmail();
+
+        CreateConversionRequest createReq = new CreateConversionRequest(
+                req.resolvedProjectName(),
+                req.websiteUrl(),
+                req.resolvedAppTitle(),
+                req.iconFile(),
+                req.modules(),
+                req.platform()
+        );
+
+        ConversionResponse created = conversionService.create(createReq, userEmail);
+        String projectId = created.id();
+
+        log.info("[quick-build] Created project '{}' ({}) for {} — modules: {}",
+                created.projectName(), projectId, userEmail, req.modules());
+
+        buildService.triggerBuild(projectId);
+
+        return ResponseEntity.accepted().body(Map.of(
+                "projectId", projectId,
+                "projectName", created.projectName(),
+                "userEmail", userEmail,
+                "modules", req.modules() != null ? req.modules() : List.of(),
+                "platform", req.platform() != null ? req.platform() : "auto",
+                "status", "BUILDING",
+                "pollUrl", "/build/status/" + projectId,
+                "progressUrl", "/build/progress/" + projectId,
+                "logsUrl", "/build/logs/" + projectId,
+                "hint", "Poll pollUrl every 5s until status=READY or FAILED"
+        ));
+    }
+
+    /**
+     * GET /build/quick-build/modules — list all modules with tier info (dev helper).
+     */
+    @GetMapping("/quick-build/modules")
+    public ResponseEntity<Map<String, Object>> listAllModulesForDev() {
+        java.util.Map<String, Object> byTier = new java.util.LinkedHashMap<>();
+        for (var tier : com.example.conversion_service.entity.ConversionProject.LicenseTier.values()) {
+            byTier.put(tier.name(), moduleRegistry.getAvailableModules(tier)
+                    .stream().map(d -> Map.of(
+                            "key", d.key(),
+                            "name", d.name(),
+                            "description", d.description()
+                    )).collect(java.util.stream.Collectors.toList()));
+        }
+        return ResponseEntity.ok(Map.of(
+                "allModules", moduleRegistry.getAllModules().stream()
+                        .map(d -> Map.of("key", d.key(), "name", d.name(),
+                                "requiredTier", d.requiredTier().name(), "description", d.description()))
+                        .collect(java.util.stream.Collectors.toList()),
+                "byTier", byTier
+        ));
     }
 
     /**
