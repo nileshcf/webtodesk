@@ -46,6 +46,13 @@
             <version>2.25.0</version>
         </dependency>
 
+        <!-- Mustache template engine for Electron file generation -->
+        <dependency>
+            <groupId>com.github.spullara.mustache.java</groupId>
+            <artifactId>compiler</artifactId>
+            <version>0.9.14</version>
+        </dependency>
+
         <!-- Test dependencies -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -53,8 +53,15 @@ Thumbs.db
 ############################
 node_modules/
 frontend/dist/
-frontend/.env
-frontend/.env.local
+
+############################
+# Environment files
+############################
+.env
+.env.local
+.env.development
+.env.production
+.env.*
 
 ############################
 # Docker

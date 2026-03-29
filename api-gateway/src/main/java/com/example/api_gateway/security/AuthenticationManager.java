@@ -4,7 +4,6 @@ import com.example.common.security.JwtValidator;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.ReactiveAuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -30,8 +29,9 @@ public class AuthenticationManager implements ReactiveAuthenticationManager {
             Claims claims = jwtValidator.validateAccessToken(token);
 
             String username = claims.getSubject();
-            List<String> roles = claims.get("roles") != null
-                    ? (List<String>) claims.get("roles")
+            Object rolesClaim = claims.get("roles");
+            List<String> roles = rolesClaim instanceof List<?> roleList
+                    ? roleList.stream().map(String::valueOf).toList()
                     : List.of("ROLE_USER");
 
             List<SimpleGrantedAuthority> authorities = roles.stream()

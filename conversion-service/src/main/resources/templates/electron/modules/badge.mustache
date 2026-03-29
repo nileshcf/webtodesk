@@ -1,0 +1,21 @@
+// Module: badge — Tier: FREE
+// Allows the app to display a badge count on the dock/taskbar icon via IPC.
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('badge')) return;
+
+  const { ipcMain, app } = require('electron');
+
+  ipcMain.on('set-badge-count', (event, count) => {
+    if (typeof count === 'number' && count >= 0) {
+      app.setBadgeCount(count);
+    }
+  });
+
+  ipcMain.on('clear-badge', () => {
+    app.setBadgeCount(0);
+  });
+}
+
+function teardown() {}
+
+module.exports = { setup, teardown };

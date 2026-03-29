@@ -60,13 +60,8 @@ public class GatewaySecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of(
-                "http://localhost:3000",
-                "http://localhost:5173",
-                "http://localhost:7860",
-                "https://webtodesk.onrender.com"
-        ));
         config.setAllowedOriginPatterns(List.of(
+                "http://localhost:[*]",
                 "https://*.onrender.com",
                 "https://*.hf.space",
                 "https://*.static.hf.space"

@@ -12,6 +12,54 @@ WebToDesk is a **Spring Boot microservices** platform that converts websites int
 
 ---
 
+## Root Automation Scripts (Agent + User Quick Reference)
+
+Use these scripts from the repo root for local development, Docker operations, and git workflows.
+
+### Script Catalog
+
+- `start-all.ps1` — start all local services with port readiness checks
+- `docker-rebuild.ps1` — rebuild monolith image with optional cleanup and no-cache mode
+- `docker-start.ps1` — run container with configurable host/container ports
+- `registry-push.ps1` — build/tag/push image to GHCR or Docker Hub for team testing
+- `registry-pull-run.ps1` — pull shared registry image and run directly
+- `git-operations.ps1` — interactive git UI and non-interactive command mode
+- `ai-doc-sync.ps1` — generate one-go app-level doc/skill update brief from git changes
+
+### AI-First Usage Pattern
+
+- Always pass `-NonInteractive` to avoid prompts.
+- Prefer `-OutputJson` for deterministic machine-readable output.
+- For safe unattended execution, pair with explicit action flags (for example, `-Action status`).
+
+```powershell
+.\start-all.ps1 -NonInteractive -NoBrowserPrompt -OutputJson
+.\docker-rebuild.ps1 -NoCache -RemoveOldImages -PruneDangling -NonInteractive -OutputJson
+.\docker-start.ps1 -StopExisting -KillPortProcess -NonInteractive -OutputJson
+.\registry-push.ps1 -GitHubRepo <github-user-or-org>/webtodesk -BuildFirst -Tag latest -ExtraTags v1.8.0 -RunLogin -NonInteractive -OutputJson
+.\registry-pull-run.ps1 -GitHubRepo <github-user-or-org>/webtodesk -Tag latest -StopExisting -PullAlways -NonInteractive -OutputJson
+.\git-operations.ps1 -Action status -OutputJson
+.\ai-doc-sync.ps1 -SinceRef HEAD~5 -OutputJson
+```
+
+### Runtime + Dependency Contract (Agents)
+
+- Java runtime must be **JDK 17**.
+- Local workspace default `JAVA_HOME` is `C:\Program Files\Java\jdk-17`.
+- Backend commands should use Maven wrapper (`mvnw`/`mvnw.cmd`) only.
+- Frontend dependency install should use `npm --prefix .\frontend ci` for reproducibility.
+- Prefer passing `-JavaHome` to `start-all.ps1` when Java path must be explicit.
+
+```powershell
+java -version
+$env:JAVA_HOME
+.\mvnw -v
+node -v
+npm -v
+```
+
+---
+
 ## Implementation Strategy
 
 ### Core Pattern: Module Injection via `FeatureConfig`
@@ -21,7 +69,8 @@ Introduce a `FeatureConfig` record that travels with every build request. `Conve
 ```
 ConversionProject
   └── featureConfig: FeatureConfig (JSON column)
-        └── tier: FREE | STARTER | FIVE_YEAR | LIFETIME
+        └── tier: TRIAL | STARTER | PRO | LIFETIME
+        └── buildFlags: BuildFlags { targetOS, priority, fileType }
         └── splashScreen: SplashScreenConfig { logoUrl, showOurLogo }
         └── titleBar: TitleBarConfig { enabled, text, style }
         └── domainLock: DomainLockConfig { allowedDomains[], blockedDomains[] }
@@ -43,21 +92,94 @@ ConversionProject
         └── buildLimit: BuildLimitConfig { buildsAllowed, buildsUsed }
 ```
 
+### OS-Specific Build Flags & Priority Queue
+
+**BuildFlags Configuration:**
+
+```java
+public record BuildFlags(
+    TargetOS targetOS,           // WINDOWS, LINUX, MACOS
+    BuildPriority priority,      // NORMAL, PRIORITY
+    FileType fileType,           // EXE, MSI, APPIMAGE, DEB, RPM, DMG, ZIP
+    boolean crossPlatform,       // true = build for all OS
+    Map<TargetOS, FileType> osFileMappings  // OS → specific file type
+) {}
+
+public enum TargetOS {
+    WINDOWS("win", ".exe", ".msi"),
+    LINUX("linux", ".AppImage", ".deb", ".rpm"),
+    MACOS("mac", ".dmg", ".zip");
+    
+    private final String electronTarget;
+    private final String[] preferredExtensions;
+}
+
+public enum BuildPriority {
+    NORMAL(1, "buildExecutorNormal"),     // Trial tier
+    PRIORITY(5, "buildExecutorPriority"); // Starter/Pro/Lifetime
+    
+    private final int threadPoolSize;
+    private final String executorBean;
+}
+
+public enum FileType {
+    WINDOWS_EXE(".exe", "NSIS"),
+    WINDOWS_MSI(".msi", "MSI"),
+    LINUX_APPIMAGE(".AppImage", "AppImage"),
+    LINUX_DEB(".deb", "deb"),
+    LINUX_RPM(".rpm", "rpm"),
+    MACOS_DMG(".dmg", "dmg"),
+    MACOS_ZIP(".zip", "zip");
+    
+    private final String extension;
+    private final String electronBuilderConfig;
+}
+```
+
+**Priority Queue Routing Logic:**
+
+```java
+@Service
+public class BuildQueueService {
+    
+    @Autowired
+    @Qualifier("buildExecutorNormal")
+    private Executor normalExecutor;
+    
+    @Autowired
+    @Qualifier("buildExecutorPriority") 
+    private Executor priorityExecutor;
+    
+    public CompletableFuture<BuildResult> routeBuild(ConversionProject project) {
+        BuildFlags flags = project.getFeatureConfig().getBuildFlags();
+        
+        Executor executor = flags.priority() == BuildPriority.PRIORITY 
+            ? priorityExecutor 
+            : normalExecutor;
+            
+        return CompletableFuture.supplyAsync(() -> {
+            return buildService.triggerBuild(project, flags);
+        }, executor);
+    }
+}
+```
+
 ---
 
 ## Tier Capability Matrix
 
-| Feature | Free (Trial) | Starter/1-Yr | Five-Year | Lifetime |
-|---|---|---|---|---|
+| Feature | Trial (2 Apps) | Starter/1-Yr | Pro/5-Yr | Lifetime |
+| --- | --- | --- | --- | --- |
+| **App Limits** | 2 active apps max | Unlimited | Unlimited | Unlimited |
+| **Build Limits** | 4 builds total (2 apps × 1 update each) | 120 builds (10/month) | 3,000 builds (50/month) | Unlimited (fair use) |
+| **License Duration** | 30 days | 1 year | 5 years | Unlimited |
+| **Build Queue** | Normal queue | Priority queue | Priority queue | Priority queue |
 | Splash screen (our logo visible) | ✅ | ✅ | ✅ | ✅ |
 | File download | ✅ | ✅ | ✅ | ✅ |
-| 1 active app | ✅ | — | — | — |
-| Domain lock (base URL only) | ✅ | — | — | — |
+| Domain lock (base URL only) | ✅ | ✅ | ✅ | ✅ |
 | Title bar basic | ✅ | ✅ | ✅ | ✅ |
-| Queued builds | ✅ | — | — | — |
-| Watermark (our brand) | ✅ | — | — | — |
+| Watermark (our brand) | ✅ | ✅ | ✅ | ✅ |
 | 30-day expiry → upgrade screen | ✅ | — | — | — |
-| Priority queue | — | ✅ | ✅ | ✅ |
 | Full domain whitelist/blacklist | — | ✅ | ✅ | ✅ |
 | Screen capture protection | — | ✅ | ✅ | ✅ |
 | Custom watermark (live, no ours) | — | ✅ | ✅ | ✅ |
@@ -72,8 +194,8 @@ ConversionProject
 | Right-click disable / custom menu | — | ✅ | ✅ | ✅ |
 | File system access | — | ✅ | ✅ | ✅ |
 | Global hotkeys | — | ✅ | ✅ | ✅ |
-| Build quota | 1 active | 10/mo | 50/mo | Unlimited (fair use) |
-| App license duration | 30 days | 1 year | 5 years | Lifetime |
+| **OS Compatibility** | Windows + Linux + Mac | Windows + Linux + Mac | Windows + Linux + Mac | Windows + Linux + Mac |
+| **Version Upgrade System** | Basic auto-update | Full auto-update | Full auto-update | Full auto-update |
 
 ---
 
@@ -85,17 +207,78 @@ ConversionProject
 
 - Add `feature_config` JSON column to `ConversionProject` entity using `@Column(columnDefinition = "TEXT")` + Jackson serialization.
 - Add `tier` enum field: `FREE | STARTER | FIVE_YEAR | LIFETIME`.
-- Add `expiresAt` (Instant), `buildCount` (int), `maxBuilds` (int) fields.
-- Update `CreateConversionRequest` DTO to accept `featureConfig`.
+- Add `license_expires_at` (Instant), `build_count` (int), `max_builds` (int), `active_apps_count` (int) fields.
+- Add `build_flags` JSON column for OS-specific build configuration.
+- Add `module_registry` JSON column for enabled modules per project.
+- Add `license_metadata` JSON column for license persistence across upgrades.
+- Update `CreateConversionRequest` DTO to accept `featureConfig` and `buildFlags`.
+
+**Database Schema Updates:**
+
+```sql
+-- ConversionProject collection updates
+db.conversionprojects.updateMany(
+  {},
+  {
+    $set: {
+      feature_config: {
+        tier: "TRIAL",
+        buildFlags: {
+          targetOS: "WINDOWS",
+          priority: "NORMAL",
+          fileType: "WINDOWS_EXE",
+          crossPlatform: false,
+          osFileMappings: {}
+        },
+        modules: [],
+        // ... other feature configs
+      },
+      license_expires_at: new Date(Date.now() + 30*24*60*60*1000), // 30 days
+      build_count: 0,
+      max_builds: 4,
+      active_apps_count: 0,
+      build_flags: {
+        targetOS: "WINDOWS",
+        priority: "NORMAL",
+        fileType: "WINDOWS_EXE",
+        crossPlatform: false,
+        osFileMappings: {}
+      },
+      module_registry: {
+        enabled: ["splash-screen", "file-download"],
+        disabled: [],
+        config: {}
+      },
+      license_metadata: {
+        licenseId: UUID().toString(),
+        issuedAt: new Date(),
+        lastValidatedAt: new Date(),
+        migrationHistory: []
+      }
+    }
+  }
+);
+
+-- Indexes for performance
+db.conversionprojects.createIndex({ "feature_config.tier": 1 });
+db.conversionprojects.createIndex({ "license_expires_at": 1 });
+db.conversionprojects.createIndex({ "build_flags.targetOS": 1 });
+db.conversionprojects.createIndex({ "build_flags.priority": 1 });
+db.conversionprojects.createIndex({ "created_by": 1, "build_count": 1 });
+```
 
 ### 1.2 — Module: Splash Screen (Free + All Tiers)
 
 **Where:** `generateMainJs()` — inject before `mainWindow.loadURL()`.
 
 **Logic:**
+
 - Create a borderless `BrowserWindow` (400×300) showing the logo image.
+
 - Free tier: always shows our WebToDesk logo watermark alongside user logo.
+
 - Pro tiers: only user logo visible (`showOurLogo: false`).
+
 - Logo URL fetched from `SplashScreenConfig.logoUrl` (uploaded to R2 during project creation).
 - Splash auto-closes after 2.5 seconds or when the main window's `did-finish-load` fires.
 
@@ -116,22 +299,32 @@ function createSplashWindow() {
 
 ### 1.3 — Module: File Download (Free + All Tiers)
 
-**Where:** `generateMainJs()` — add `will-download` handler on `webContents.session`.
+**Where:** `generatePreloadJs()` — inject `downloadFile()` function and IPC handler.
 
 **Logic:**
-- Intercept `session.defaultSession.on('will-download')`.
-- Show native Save dialog using `dialog.showSaveDialogSync`.
-- Set download path, attach progress listener, emit IPC events for UI progress display.
+
+- Add `ipcMain.handle('download-file', (_, url, filename) => ...)`.
+
+- In preload: expose `window.downloadFile = (url, filename) => ipcRenderer.invoke('download-file', url, filename)`.
+
+- Use `dialog.showSaveDialogSync()` for native save dialog, then `fs.createWriteStream` + axios download.
+
+- Free tier: basic download; Pro tiers: add progress callback and resume capability.
 - Free tier: downloads work but installer is watermarked.
 
-### 1.4 — Module: Domain Lock (Free Tier Only)
+### 1.4 — Module: Domain Lock (Free + All Tiers)
 
-**Where:** `generateMainJs()` — add `will-navigate` and `new-window` event handlers.
+**Where:** `generateMainJs()` — inject `webContents.beforeNavigate` check.
 
 **Logic:**
-- `allowedDomains` array (from `DomainLockConfig`) contains only the base URL hostname.
-- On every navigation attempt, parse URL hostname and block if not in allowlist.
-- Show in-app toast: "Navigation to external sites is disabled in this version."
+
+- Load `allowedDomains[]` and `blockedDomains[]` from `DomainLockConfig`.
+
+- On `beforeNavigate`, check if navigation target matches any allowed domain (or base URL).
+
+- If blocked, show `DomainLockConfig.blockMessage` and cancel navigation.
+
+- Free tier: only base URL allowed; Pro tiers: full regex whitelist/blacklist support.
 - Pro tier: replaces with full `DomainWhitelistBlacklist` module (Phase 2).
 
 ### 1.5 — Module: Title Bar Customization (Free + All Tiers)
@@ -139,19 +332,91 @@ function createSplashWindow() {
 **Where:** `generateMainJs()` — `BrowserWindow` constructor options + `setTitle` logic.
 
 **Logic:**
+
 - `enabled: false` → `frame: false`, custom frameless window with draggable CSS region injected via `preload.js`.
+
 - `enabled: true` → standard frame, `title` set from `TitleBarConfig.text`.
+
 - Style options (`style: 'hidden' | 'hiddenInset' | 'default'`) mapped to Electron's `titleBarStyle` option on macOS.
+
 - `page-title-updated` event always prevented to keep the custom title.
 
-### 1.6 — Module: Build Queue Priority
+### 1.6 — Module: Build Queue Priority with OS Routing
 
-**Where:** `BuildService.java` — `@Async("buildExecutor")` thread pool configuration.
+**Where:** `BuildService.java` — `@Async("buildExecutor")` thread pool configuration + `BuildQueueService`.
 
 **Logic:**
-- Free tier: uses a `buildExecutorFree` thread pool with `corePoolSize=1`, `queueCapacity=50`.
-- Pro tiers: uses `buildExecutorPro` with `corePoolSize=5`, instant dispatch.
-- `BuildQueueService` bean selects executor based on project tier before triggering.
+
+- **OS-specific routing**: `BuildFlags.targetOS` determines electron-builder target (`--win`, `--linux`, `--mac`).
+
+- **File type mapping**: `BuildFlags.fileType` maps to specific installer formats (`.exe`, `.msi`, `.AppImage`, `.deb`, `.rpm`, `.dmg`, `.zip`).
+
+- **Priority queues**: Trial tier uses `buildExecutorNormal` (1 thread, 50 capacity), Pro tiers use `buildExecutorPriority` (5 threads, instant dispatch).
+
+- **Cross-platform builds**: `crossPlatform: true` triggers parallel builds for all OS targets.
+
+```java
+@Service
+public class BuildQueueService {
+    
+    @Async("buildExecutorNormal")
+    public CompletableFuture<BuildResult> queueNormalBuild(ConversionProject project) {
+        return buildService.triggerBuild(project, project.getBuildFlags());
+    }
+    
+    @Async("buildExecutorPriority")
+    public CompletableFuture<BuildResult> queuePriorityBuild(ConversionProject project) {
+        return buildService.triggerBuild(project, project.getBuildFlags());
+    }
+    
+    public List<CompletableFuture<BuildResult>> queueCrossPlatformBuild(ConversionProject project) {
+        List<CompletableFuture<BuildResult>> builds = new ArrayList<>();
+        
+        for (TargetOS os : project.getBuildFlags().getOsFileMappings().keySet()) {
+            BuildFlags osFlags = project.getBuildFlags().withTargetOS(os);
+            builds.add(queuePriorityBuild(project)); // All cross-platform builds get priority
+        }
+        
+        return builds;
+    }
+}
+```
+
+**Optimized File Type Detection:**
+
+```java
+public class FileTypeResolver {
+    
+    private static final Map<TargetOS, Map<String, FileType>> OS_FILE_MAPPINGS = Map.of(
+        TargetOS.WINDOWS, Map.of(
+            "exe", FileType.WINDOWS_EXE,
+            "msi", FileType.WINDOWS_MSI
+        ),
+        TargetOS.LINUX, Map.of(
+            "appimage", FileType.LINUX_APPIMAGE,
+            "deb", FileType.LINUX_DEB,
+            "rpm", FileType.LINUX_RPM
+        ),
+        TargetOS.MACOS, Map.of(
+            "dmg", FileType.MACOS_DMG,
+            "zip", FileType.MACOS_ZIP
+        )
+    );
+    
+    public static FileType resolveFileType(TargetOS os, String requestedType) {
+        return OS_FILE_MAPPINGS.getOrDefault(os, Map.of())
+            .getOrDefault(requestedType.toLowerCase(), getDefaultFileType(os));
+    }
+    
+    public static FileType getDefaultFileType(TargetOS os) {
+        return switch (os) {
+            case WINDOWS -> FileType.WINDOWS_EXE;
+            case LINUX -> FileType.LINUX_APPIMAGE;
+            case MACOS -> FileType.MACOS_DMG;
+        };
+    }
+}
+```
 
 ### 1.7 — Module: Watermark (Free Tier — Our Brand)
 
@@ -418,29 +683,91 @@ app.whenReady().then(() => {
 New `LicenseService` bean in `conversion-service`:
 
 - On every build request, validate: `tier`, `expiresAt`, `buildsUsed < maxBuilds`, `activeAppsCount < maxActiveApps`.
-- Free: 1 active app, 1 build ever, expires 30 days from creation.
-- Starter: 10 builds/month rolling window, apps expire 1 year from purchase date.
-- Five-Year: 50 builds/month, apps expire 5 years from purchase.
-- Lifetime: unlimited builds (soft cap at 500/month for abuse prevention), no expiry.
+- **Trial**: 2 active apps max, 4 builds total (2 apps × 1 update each), expires 30 days from creation.
+- **Starter**: 120 builds total (10 per month rolling window), apps expire 1 year from purchase date.
+- **Pro**: 3,000 builds total (50 per month rolling window), apps expire 5 years from purchase.
+- **Lifetime**: unlimited builds (soft cap at 500/month for abuse prevention), no expiry.
 - Return typed `LicenseViolation` exceptions that surface to the user as clear error messages.
 
 ### 3.2 — Build Counter & Quota Tracking
 
 - `ConversionProject` gets `buildCount` (int) + `lastBuildResetAt` (Instant).
 - Monthly rolling reset: on each build, if `now - lastBuildResetAt > 30 days`, reset `buildCount = 0`.
+- Trial tier: hard limit of 4 builds total, no monthly reset.
 - Quota exceeded → return `402 Payment Required` with upgrade URL in response body.
 
-### 3.3 — Watermarked Installer (Free Tier)
+### 3.3 — License Expiry Enforcement
+
+**Backend enforcement:**
+- `LicenseService` checks `project.getLicenseExpiresAt()` before allowing any build or download.
+- Expired projects get `status: LICENSE_EXPIRED`, no builds or downloads allowed.
+- Frontend shows upgrade CTA with link to pricing page.
+
+**Runtime enforcement (in the built app):**
+- `config.js` includes `licenseExpiresAt` timestamp.
+- On app start, `main.js` checks `Date.now() > licenseExpiresAt`.
+- If expired: load `license-expired.html` screen blocking all other functionality.
+- License expiry screen shows upgrade CTA and blocks navigation to any other content.
+
+```javascript
+// INJECT: license expiry check
+const { licenseExpiresAt, upgradeUrl } = require('./config');
+if (Date.now() > licenseExpiresAt) {
+  mainWindow.loadFile(path.join(__dirname, 'license-expired.html'));
+  mainWindow.setResizable(false);
+  mainWindow.setMenuBarVisibility(false);
+  return; // don't load websiteUrl
+}
+```
+
+**New file injected:** `license-expired.html` (bundled in build assets).
+
+### 3.4 — Watermarked Installer (Trial Tier)
 
 Two approaches — use approach (a) as primary:
 
-**(a) NSIS script injection (Windows):** In `generatePackageJson()` for Free tier, add custom NSIS script that appends a "Trial Version" text to installer screens and desktop shortcut name.
+**(a) NSIS script injection (Windows):** In `generatePackageJson()` for Trial tier, add custom NSIS script that appends a "Trial Version" text to installer screens and desktop shortcut name.
 
 **(b) Binary patching:** Post-build, use a script to patch the installer header. More fragile — avoid.
 
-### 3.4 — Upgrade Screen Asset
+### 3.5 — Version Upgrade System
 
-Bundle `expired.html` as a static resource in the conversion-service (under `src/main/resources/templates/electron/`). It is copied into the build workspace alongside `main.js`. Content: branded WebToDesk upgrade page with a CTA button pointing to the pricing page URL (injected from `config.js`).
+**Automatic version detection and upgrade:**
+- When user creates version 2.0.0+ of same app, older versions receive automatic update notification.
+- License file persists across upgrades with all expiry dates and metadata carried forward.
+- Upgrade flow: old app detects new version → shows upgrade dialog → downloads new installer → preserves license file in user data directory.
+
+**License persistence implementation:**
+```javascript
+// INJECT: license persistence
+const LICENSE_FILE_PATH = path.join(app.getPath('userData'), 'license.json');
+
+function loadLicense() {
+  try {
+    return JSON.parse(fs.readFileSync(LICENSE_FILE_PATH, 'utf8'));
+  } catch (e) {
+    return config.license; // fallback to bundled license
+  }
+}
+
+function saveLicense(license) {
+  fs.writeFileSync(LICENSE_FILE_PATH, JSON.stringify(license, null, 2));
+}
+
+// On app start, check for updates
+const currentVersion = app.getVersion();
+const license = loadLicense();
+
+if (license.appVersion !== currentVersion) {
+  // Version mismatch → check for update
+  checkForUpdateAndMigrate(license, currentVersion);
+}
+```
+
+**Version upgrade server endpoint:**
+- `GET /api/v1/apps/{appId}/versions` → returns list of available versions
+- `POST /api/v1/apps/{appId}/upgrade/{fromVersion}/{toVersion}` → generates upgrade installer
+- License metadata carried forward: `licenseId`, `expiresAt`, `tier`, `features`
 
 ---
 
@@ -451,16 +778,181 @@ Bundle `expired.html` as a static resource in the conversion-service (under `src
 In the `frontend` service, add a multi-step project creation wizard:
 
 **Step 1:** Basic info (URL, title, icon upload).  
-**Step 2:** Feature toggles — grouped by tier. Free features always enabled; Pro features shown but locked with upgrade CTA for Free users.  
-**Step 3:** Per-feature configuration panels (e.g. splash screen logo upload, watermark text/position, tray menu editor, domain lists).  
-**Step 4:** Review → Build.
+**Step 2:** License tier selection with feature comparison table.  
+**Step 3:** OS configuration (Windows/Linux/Mac targets, file types, cross-platform builds).  
+**Step 4:** Feature toggles — grouped by tier. Free features always enabled; Pro features shown but locked with upgrade CTA for Free users.  
+**Step 5:** Per-feature configuration panels (e.g. splash screen logo upload, watermark text/position, tray menu editor, domain lists).  
+**Step 6:** Review → Build.
 
 ### 4.2 — Tier Badge & Upgrade Prompts
 
 - Show current tier badge in dashboard header.
 - Locked Pro features show a `🔒 Pro` badge with a modal on click.
 - Build quota indicator (e.g. "8 of 10 builds used this month").
-- Expiry countdown for Free tier ("Trial expires in 12 days").
+- Expiry countdown for Trial tier ("Trial expires in 12 days").
+- License expiry screen for expired apps with upgrade CTA.
+
+### 4.3 — OS Configuration Interface
+
+**Build Target Selection:**
+```typescript
+interface BuildConfigForm {
+  targetOS: TargetOS[];           // Multi-select for cross-platform
+  fileType: Record<TargetOS, FileType>;
+  crossPlatform: boolean;
+  priorityBuild: boolean;        // Available for Pro+ tiers
+}
+```
+
+**OS-Specific Options:**
+- Windows: Choose between .exe (NSIS) or .msi installer
+- Linux: Choose between .AppImage, .deb, or .rpm packages
+- macOS: Choose between .dmg or .zip distribution
+- Cross-platform: Build for all selected OS simultaneously
+
+### 4.4 — Module Configuration UI
+
+**Feature Toggle Groups:**
+```typescript
+interface ModuleConfig {
+  // Free Tier Modules
+  splashScreen: SplashScreenConfig;
+  titleBar: TitleBarConfig;
+  domainLock: DomainLockConfig;
+  fileDownload: boolean;
+  watermark: WatermarkConfig;
+  
+  // Pro Tier Modules (locked for Trial)
+  screenCaptureProtection: boolean;
+  customKeyBindings: KeyBindingConfig[];
+  offlineCache: OfflineCacheConfig;
+  autoUpdate: AutoUpdateConfig;
+  nativeNotifications: boolean;
+  systemTray: TrayConfig;
+  darkLightSync: boolean;
+  clipboardIntegration: boolean;
+  windowPolish: WindowPolishConfig;
+  rightClickDisable: RightClickConfig;
+  fileSystemAccess: FileSystemConfig;
+  globalHotkeys: GlobalHotkeyConfig[];
+}
+```
+
+**Module-Specific UI Components:**
+- **Splash Screen**: Logo upload, preview, WebToDesk branding toggle
+- **Domain Lock**: Domain whitelist/blacklist editor with regex support
+- **Watermark**: Text input, color picker, position selector, opacity slider
+- **Key Bindings**: Accelerator input with validation, action dropdown
+- **System Tray**: Tooltip input, context menu builder
+- **File System**: Path selector with permission settings
+
+### 4.5 — License Management Interface
+
+**License Dashboard:**
+```typescript
+interface LicenseDashboard {
+  currentTier: LicenseTier;
+  licenseExpiresAt: string;
+  buildsUsed: number;
+  buildsAllowed: number;
+  activeApps: number;
+  maxActiveApps: number;
+  upgradeOptions: UpgradeOption[];
+}
+```
+
+**Upgrade Flow:**
+1. Show upgrade modal when user clicks locked feature or hits quota limit
+2. Display tier comparison with feature matrix
+3. Handle payment integration (Stripe/PayPal)
+4. Update license on successful payment
+5. Refresh project permissions and build quotas
+
+### 4.6 — Version Upgrade Interface
+
+**Version Management:**
+- Show version history for each app
+- Display available updates with changelog
+- One-click upgrade with license persistence
+- Rollback capability for Pro tiers
+
+**Upgrade Dialog:**
+```typescript
+interface UpgradeDialog {
+  currentVersion: string;
+  availableVersion: string;
+  changelog: string[];
+  licensePreservation: boolean;
+  upgradeSize: string;
+  estimatedTime: string;
+}
+```
+
+### 4.7 — Build Queue Visualization
+
+**Queue Status Display:**
+- Real-time build progress with SSE updates
+- Queue position indicator for normal queue users
+- Priority badge for Pro tier builds
+- Cross-platform build progress grid
+
+**Build Metrics Dashboard:**
+- Build success rate per OS
+- Average build time by tier
+- Queue wait times
+- Monthly build usage chart
+
+### 4.8 — Frontend Architecture Updates
+
+**New Components Structure:**
+```
+frontend/src/
+├── components/
+│   ├── ui/                      # Reusable UI components
+│   │   ├── TierBadge.tsx
+│   │   ├── BuildProgress.tsx
+│   │   ├── OSSelector.tsx
+│   │   └── ModuleToggle.tsx
+│   ├── wizard/                  # Multi-step creation wizard
+│   │   ├── ProjectWizard.tsx
+│   │   ├── BasicInfoStep.tsx
+│   │   ├── LicenseStep.tsx
+│   │   ├── OSConfigStep.tsx
+│   │   ├── FeaturesStep.tsx
+│   │   ├── ReviewStep.tsx
+│   │   └── StepNavigation.tsx
+│   ├── modules/                 # Feature-specific components
+│   │   ├── SplashScreenConfig.tsx
+│   │   ├── DomainLockConfig.tsx
+│   │   ├── WatermarkConfig.tsx
+│   │   ├── KeyBindingsConfig.tsx
+│   │   └── SystemTrayConfig.tsx
+│   ├── license/                 # License management
+│   │   ├── LicenseDashboard.tsx
+│   │   ├── UpgradeModal.tsx
+│   │   ├── TierComparison.tsx
+│   │   └── UsageChart.tsx
+│   └── build/                   # Build management
+│       ├── BuildQueue.tsx
+│       ├── CrossPlatformBuild.tsx
+│       ├── VersionManager.tsx
+│       └── BuildMetrics.tsx
+├── hooks/
+│   ├── useLicense.ts            # License state management
+│   ├── useBuildQueue.ts         # Build queue monitoring
+│   ├── useFeatureConfig.ts      # Feature configuration
+│   └── useVersionUpgrade.ts     # Version upgrade logic
+├── services/
+│   ├── api.ts                   # Updated API endpoints
+│   ├── licenseApi.ts            # License-specific API
+│   ├── buildApi.ts              # Build-specific API
+│   └── versionApi.ts            # Version management API
+└── types/
+    ├── license.ts              # License-related types
+    ├── build.ts                 # Build configuration types
+    ├── modules.ts               # Module configuration types
+    └── upgrade.ts               # Version upgrade types
+```
 
 ---
 
@@ -1842,4 +2334,40 @@ private String generatePreloadJs(FeatureConfig config) {
     sb.append(PRELOAD_JS_FOOTER);
     return sb.toString();
 }
+```
+
+---
+
+## Deployment & Configuration
+
+### CORS Localhost Pattern Fix
+
+**Issue:** When running the monolith Docker container on port 8090, browser gets 403 Forbidden because `GatewaySecurityConfig` only allows specific localhost origins.
+
+**Root Cause:** Browser sends `Origin: http://localhost:8090` but config only had `http://localhost:7860` in allowed origins list.
+
+**Solution:** Replace static origins with wildcard pattern to match any localhost port:
+
+```java
+// GatewaySecurityConfig.java - corsConfigurationSource()
+config.setAllowedOriginPatterns(List.of(
+    "http://localhost:[*]",  // Matches any localhost port (3000, 5173, 7860, 8090, etc.)
+    "https://*.onrender.com",
+    "https://*.hf.space",
+    "https://*.static.hf.space"
+));
+```
+
+**Impact:** 
+- ✅ Local development works on any port without CORS errors
+- ✅ Production deployments still properly restricted
+- ✅ Frontend can successfully authenticate via `/user/auth/login`
+
+**Verification:**
+```bash
+# Preflight should return 204 with proper CORS headers
+curl -X OPTIONS http://localhost:8090/user/auth/login \
+  -H "Origin: http://localhost:8090" \
+  -H "Access-Control-Request-Method: POST" \
+  -H "Access-Control-Request-Headers: Content-Type"
 ```

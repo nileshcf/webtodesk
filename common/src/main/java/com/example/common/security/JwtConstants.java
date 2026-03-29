@@ -1,8 +1,5 @@
 package com.example.common.security;
 
-
-import org.springframework.beans.factory.annotation.Value;
-
 public class JwtConstants {
     public static final String HEADER = "Authorization";
     public static final String PREFIX = "Bearer ";

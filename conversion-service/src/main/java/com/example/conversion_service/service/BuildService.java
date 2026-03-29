@@ -1,7 +1,9 @@
 package com.example.conversion_service.service;
 
+import com.example.conversion_service.entity.BuildRecord;
 import com.example.conversion_service.entity.ConversionProject;
 import com.example.conversion_service.entity.ConversionProject.ConversionStatus;
+import com.example.conversion_service.entity.ConversionProject.LicenseTier;
 import com.example.conversion_service.exception.ProjectNotFoundException;
 import com.example.conversion_service.repository.ConversionRepository;
 import lombok.RequiredArgsConstructor;
@@ -9,13 +11,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.slf4j.MDC;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -27,12 +32,38 @@ public class BuildService {
 
     private final ConversionRepository repository;
     private final R2StorageService r2StorageService;
+    private final LicenseService licenseService;
+    private final BuildQueueService buildQueueService;
+    private final TemplateEngine templateEngine;
+    private final ModuleRegistry moduleRegistry;
+    private final BuildMetricsService buildMetricsService;
 
     @Value("${webtodesk.build.output-dir:${java.io.tmpdir}/webtodesk-builds}")
     private String buildOutputDir;
 
     @Value("${webtodesk.build.target-platform:auto}")
     private String targetPlatform;
+
+    @Value("${webtodesk.build.development-build:false}")
+    private boolean developmentBuild;
+
+    @Value("${webtodesk.build.keep-workspace-on-failure:false}")
+    private boolean keepWorkspaceOnFailure;
+
+    @Value("${webtodesk.build.electron-builder.debug:false}")
+    private boolean electronBuilderDebug;
+
+    @Value("${webtodesk.build.linux-target:AppImage}")
+    private String linuxTarget;
+
+    @Value("${webtodesk.build.retry.max-attempts:3}")
+    private int maxRetryAttempts;
+
+    @Value("${webtodesk.build.retry.backoff-ms:3000}")
+    private long retryBackoffMs;
+
+    @Value("${webtodesk.build.retry.jitter-ms:750}")
+    private long retryJitterMs;
 
     // SSE emitters per projectId — multiple clients can subscribe
     private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
@@ -54,6 +85,16 @@ public class BuildService {
         ConversionProject project = repository.findById(projectId)
                 .orElseThrow(() -> new ProjectNotFoundException(projectId));
 
+        MDC.put("projectId", projectId);
+        if (project.getCreatedBy() != null) MDC.put("userEmail", project.getCreatedBy());
+
+        // License check — throws LicenseViolationException (→ 402) if quota exceeded
+        if (!developmentBuild) {
+            licenseService.validateBuildRequest(project);
+        } else {
+            log.warn("[DEV MODE] Skipping license validation for project '{}'", project.getProjectName());
+        }
+
         project.setStatus(ConversionStatus.BUILDING);
         project.setBuildProgress("PREPARING");
         project.setBuildStartedAt(Instant.now());
@@ -63,7 +104,11 @@ public class BuildService {
         repository.save(project);
         emitProgress(projectId, "PREPARING", "Preparing build workspace...");
 
+        buildQueueService.recordBuildStarted(projectId,
+                project.getTier() != null ? project.getTier() : com.example.conversion_service.entity.ConversionProject.LicenseTier.TRIAL);
+
         Path workspace = null;
+        boolean buildFailed = false;
 
         try {
             // 0. Validate build environment before touching disk
@@ -86,15 +131,24 @@ public class BuildService {
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            buildFailed = true;
             failBuild(project, "Build interrupted");
         } catch (Exception e) {
             log.error("Build failed for '{}': {}", project.getProjectName(), e.getMessage(), e);
+            buildFailed = true;
             failBuild(project, e.getMessage());
         } finally {
-            // 6. Cleanup workspace
+            // 6. Cleanup workspace and release queue slot
             if (workspace != null) {
-                cleanupWorkspace(workspace);
+                if (buildFailed && keepWorkspaceOnFailure) {
+                    log.warn("Keeping build workspace for troubleshooting: {}", workspace);
+                } else {
+                    cleanupWorkspace(workspace);
+                }
             }
+            buildQueueService.recordBuildFinished(projectId,
+                    project.getTier() != null ? project.getTier() : com.example.conversion_service.entity.ConversionProject.LicenseTier.TRIAL);
+            MDC.clear();
         }
     }
 
@@ -170,31 +224,87 @@ public class BuildService {
     private void runNpmInstall(ConversionProject project, Path workspace) throws IOException, InterruptedException {
         updateProgress(project, "INSTALLING", "Running npm install...");
 
-        int exitCode = runProcess(project.getId(), workspace, command("npm", "install", "--no-audit", "--no-fund"));
+        ProcessResult result = runProcessWithRetries(
+                project.getId(),
+                workspace,
+                "npm install",
+                command("npm", "install", "--no-audit", "--no-fund", "--prefer-offline"),
+                null
+        );
 
-        if (exitCode != 0) {
-            throw new IOException("npm install failed with exit code " + exitCode);
+        if (result.exitCode() != 0) {
+            throw new IOException("npm install failed with exit code " + result.exitCode() + "\n" + result.outputTail());
         }
 
         log.info("npm install completed for '{}'", project.getProjectName());
     }
 
     private void runElectronBuilder(ConversionProject project, Path workspace) throws IOException, InterruptedException {
-        BuildTarget buildTarget = resolveBuildTarget();
+        BuildTarget buildTarget = resolveBuildTarget(project);
         updateProgress(project, "BUILDING", "Running electron-builder for " + buildTarget.cliValue + " target (this may take a few minutes)...");
 
-        int exitCode = runProcess(project.getId(), workspace,
-                command("npx", "electron-builder", "--" + buildTarget.cliValue, "--publish=never"));
+        Map<String, String> envOverrides = buildEnvironmentOverridesFor(buildTarget);
+        if (buildTarget == BuildTarget.WIN && !isWindows()) {
+            ProcessResult wineboot = runProcessWithRetries(
+                    project.getId(),
+                    workspace,
+                    "wineboot",
+                    command("wineboot", "-u"),
+                    envOverrides
+            );
+            if (wineboot.exitCode() != 0) {
+                throw new IOException("wineboot failed with exit code " + wineboot.exitCode() + "\n" + wineboot.outputTail());
+            }
+        }
 
-        if (exitCode != 0) {
-            throw new IOException("electron-builder failed with exit code " + exitCode);
+        // Build platform flags (shared between both execution paths)
+        List<String> flags = new ArrayList<>();
+        flags.add("--" + buildTarget.cliValue);
+        if (buildTarget == BuildTarget.WIN && !isWindows()) {
+            flags.add("--x64");
+        }
+        flags.add("--publish=never");
+        if (electronBuilderDebug) {
+            flags.add("--debug");
+        }
+
+        // On Linux/Docker: invoke via 'node <resolved-entry>' to bypass noexec tmpfs restriction.
+        // Docker mounts the build workspace tmpfs with noexec by default; the OS blocks exec()
+        // on noexec mounts but node reads JS with read(), which is not affected by noexec.
+        // On Windows: .bin/electron-builder is a POSIX shell script — node cannot parse it,
+        // so fall back to npx which handles Windows .cmd shims correctly.
+        final String[] ebCommand;
+        if (isWindows()) {
+            List<String> winArgs = new ArrayList<>();
+            winArgs.add("electron-builder");
+            winArgs.addAll(flags);
+            ebCommand = command("npx", winArgs.toArray(new String[0]));
+        } else {
+            String ebEntry = resolveNodeBinEntry(workspace, "electron-builder");
+            log.debug("electron-builder entry point: {}", ebEntry);
+            List<String> nodeArgs = new ArrayList<>();
+            nodeArgs.add(ebEntry);
+            nodeArgs.addAll(flags);
+            ebCommand = command("node", nodeArgs.toArray(new String[0]));
+        }
+
+        ProcessResult result = runProcessWithRetries(
+                project.getId(),
+                workspace,
+                "electron-builder",
+                ebCommand,
+                envOverrides
+        );
+
+        if (result.exitCode() != 0) {
+            throw new IOException("electron-builder failed with exit code " + result.exitCode() + "\n" + result.outputTail());
         }
 
         log.info("electron-builder completed for '{}'", project.getProjectName());
     }
 
     private void uploadArtifact(ConversionProject project, Path workspace) throws IOException {
-        BuildTarget buildTarget = resolveBuildTarget();
+        BuildTarget buildTarget = resolveBuildTarget(project);
         updateProgress(project, "FINDING_ARTIFACT", "Looking for built installer artifact...");
 
         Path distDir = workspace.resolve("dist");
@@ -218,13 +328,30 @@ public class BuildService {
 
         String publicUrl = r2StorageService.uploadFile(installerArtifact, r2Key, "application/octet-stream");
 
-        // Update project
+        // Update project and increment build quota counter
         project.setStatus(ConversionStatus.READY);
         project.setBuildProgress("COMPLETE");
         project.setBuildArtifactPath(publicUrl);
         project.setR2Key(r2Key);
         project.setBuildError(null);
+        project.setBuildCount(project.getBuildCount() != null ? project.getBuildCount() + 1 : 1);
         repository.save(project);
+
+        // Record successful build
+        long successDurationMs = project.getBuildStartedAt() != null
+                ? Instant.now().toEpochMilli() - project.getBuildStartedAt().toEpochMilli() : 0;
+        buildMetricsService.save(BuildRecord.builder()
+                .projectId(project.getId())
+                .projectName(project.getProjectName())
+                .userEmail(project.getCreatedBy())
+                .tier(project.getTier() != null ? project.getTier() : LicenseTier.TRIAL)
+                .result("READY")
+                .artifactUrl(publicUrl)
+                .buildTarget(resolveBuildTarget(project).cliValue)
+                .enabledModules(project.getEnabledModules())
+                .completedAt(Instant.now())
+                .durationMs(successDurationMs)
+                .build());
 
         emitProgress(project.getId(), "COMPLETE", "Build complete! Download ready.");
         log.info("Build artifact uploaded to R2 for '{}': {}", project.getProjectName(), publicUrl);
@@ -242,6 +369,10 @@ public class BuildService {
                     "Ensure Node.js is installed in the build environment. " +
                     "Effective PATH: " + buildEnvironment().getOrDefault("PATH", "(not set)"));
         }
+        Integer nodeMajor = parseMajorVersion(nodeVersion);
+        if (nodeMajor == null || nodeMajor < 20) {
+            throw new IOException("Node.js 20+ required for this Electron template (found: " + nodeVersion + ")");
+        }
         log.info("[env] node {}", nodeVersion);
 
         String npmVersion = getToolVersion(resolveExecutable("npm"), "--version");
@@ -249,6 +380,26 @@ public class BuildService {
             throw new IOException("npm not found in PATH. Ensure npm is installed in the build environment.");
         }
         log.info("[env] npm  {}", npmVersion);
+
+        BuildTarget buildTarget = resolveBuildTarget(project);
+        if (buildTarget == BuildTarget.LINUX && "AppImage".equalsIgnoreCase(linuxTarget) && !isWindows()) {
+            if (!isLibFuse2Available()) {
+                throw new IOException(
+                        "Missing 'libfuse2' in the build environment. " +
+                        "electron-builder runs appimagetool (an AppImage) to produce AppImage installers, " +
+                        "and appimagetool requires libfuse.so.2. " +
+                        "Fix: install 'libfuse2' (Ubuntu/Debian) or change webtodesk.build.linux-target to 'deb'/'rpm'.");
+            }
+        }
+        if (buildTarget == BuildTarget.WIN && !isWindows()) {
+            String wineVersion = getToolVersion("wine", "--version");
+            if (wineVersion == null) {
+                throw new IOException(
+                        "Building Windows installers on Linux requires Wine, but 'wine' was not found. " +
+                        "Fix: install wine (and wine64/wine32) in the Docker image, or run Windows builds on a Windows host.");
+            }
+            log.info("[env] wine {}", wineVersion);
+        }
 
         File outputDir = new File(buildOutputDir);
         outputDir.mkdirs();
@@ -284,6 +435,21 @@ public class BuildService {
 
         env.put("CI", "true");
         env.put("ADBLOCK", "true");
+        env.putIfAbsent("CSC_IDENTITY_AUTO_DISCOVERY", "false");
+
+        env.putIfAbsent("npm_config_fetch_retries", "5");
+        env.putIfAbsent("npm_config_fetch_retry_factor", "2");
+        env.putIfAbsent("npm_config_fetch_retry_mintimeout", "20000");
+        env.putIfAbsent("npm_config_fetch_retry_maxtimeout", "120000");
+
+        String tmp = System.getProperty("java.io.tmpdir", "/tmp");
+        env.putIfAbsent("XDG_CACHE_HOME", tmp + "/xdg-cache");
+        env.putIfAbsent("ELECTRON_BUILDER_CACHE", tmp + "/electron-builder-cache");
+
+        if (electronBuilderDebug) {
+            env.put("ELECTRON_BUILDER_LOG_LEVEL", "debug");
+            env.putIfAbsent("DEBUG", "electron-builder*");
+        }
         return env;
     }
 
@@ -314,8 +480,10 @@ public class BuildService {
      * Runs a process and streams stdout/stderr lines to the SSE emitter in real-time.
      * Returns the exit code.
      */
-    private int runProcess(String projectId, Path workingDir, String[] command) throws IOException, InterruptedException {
-        log.info("Running: {} in {}", String.join(" ", command), workingDir);
+    private record ProcessResult(int exitCode, String outputTail) {}
+
+    private ProcessResult runProcess(String projectId, Path workingDir, String label, String[] command, Map<String, String> envOverrides) throws IOException, InterruptedException {
+        log.info("Running ({}): {} in {}", label, String.join(" ", command), workingDir);
 
         ProcessBuilder pb = new ProcessBuilder(command)
                 .directory(workingDir.toFile())
@@ -326,22 +494,39 @@ public class BuildService {
         // relies on inherited env vars that get wiped by clear().
         // buildEnvironment() already starts from System.getenv() and overlays build-specific vars.
         pb.environment().putAll(buildEnvironment());
+        if (envOverrides != null && !envOverrides.isEmpty()) {
+            pb.environment().putAll(envOverrides);
+        }
 
         Process process = pb.start();
 
-        // Stream stdout/stderr to SSE in real-time; buffer tail lines for error context
-        List<String> outputLines = new ArrayList<>();
+        int maxTailLines = 120;
+        ArrayDeque<String> tail = new ArrayDeque<>(maxTailLines + 1);
+        Path logFile = workingDir.resolve("build.log");
+
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
             String line;
             int lineCount = 0;
-            while ((line = reader.readLine()) != null) {
-                log.debug("[build:{}] {}", projectId, line);
-                outputLines.add(line);
-                lineCount++;
-                // Send every 5th line to SSE to avoid flooding the client
-                if (lineCount % 5 == 0) {
-                    String truncated = line.length() > 120 ? line.substring(0, 120) + "..." : line;
-                    emitProgress(projectId, "BUILD_LOG", truncated);
+            try (BufferedWriter logWriter = Files.newBufferedWriter(logFile,
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.WRITE,
+                    StandardOpenOption.APPEND)) {
+                while ((line = reader.readLine()) != null) {
+                    logWriter.write(line);
+                    logWriter.newLine();
+
+                    if (tail.size() >= maxTailLines) {
+                        tail.removeFirst();
+                    }
+                    tail.addLast(line);
+
+                    lineCount++;
+                    boolean isErrorLine = isSignificantLogLine(line);
+                    if (lineCount % 5 == 0 || isErrorLine) {
+                        String truncated = line.length() > 120 ? line.substring(0, 120) + "..." : line;
+                        emitProgress(projectId, isErrorLine ? "BUILD_ERROR" : "BUILD_LOG", truncated);
+                    }
                 }
             }
         }
@@ -354,12 +539,85 @@ public class BuildService {
 
         int exitCode = process.exitValue();
         log.info("Process exited with code {} for {}", exitCode, String.join(" ", command));
+        String tailText = truncateForStorage(String.join("\n", tail), 20_000);
         if (exitCode != 0) {
-            int start = Math.max(0, outputLines.size() - 20);
-            String tail = String.join("\n", outputLines.subList(start, outputLines.size()));
-            log.error("Process failed (exit {}). Last output:\n{}", exitCode, tail);
+            log.error("Process failed (exit {}). Last output:\n{}", exitCode, tailText);
         }
-        return exitCode;
+        return new ProcessResult(exitCode, tailText.isBlank() ? "(no output captured)" : tailText);
+    }
+
+    private ProcessResult runProcessWithRetries(
+            String projectId,
+            Path workingDir,
+            String label,
+            String[] command,
+            Map<String, String> envOverrides
+    ) throws IOException, InterruptedException {
+        int attempts = Math.max(1, maxRetryAttempts);
+        ProcessResult last = null;
+
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            if (attempt > 1) {
+                long delay = computeRetryDelayMs(attempt);
+                emitProgress(projectId, "RETRYING", label + " retry " + attempt + "/" + attempts + " in " + delay + "ms");
+                Thread.sleep(delay);
+            }
+
+            last = runProcess(projectId, workingDir, label, command, envOverrides);
+            if (last.exitCode() == 0) {
+                return last;
+            }
+            if (!isRetryableFailure(label, last.outputTail()) || attempt == attempts) {
+                return last;
+            }
+        }
+
+        return last == null ? new ProcessResult(1, "No output") : last;
+    }
+
+    private long computeRetryDelayMs(int attempt) {
+        long base = Math.max(250L, retryBackoffMs);
+        long pow = 1L << Math.min(10, Math.max(0, attempt - 2));
+        long jitter = ThreadLocalRandom.current().nextLong(0, Math.max(1L, retryJitterMs));
+        long delay = base * pow + jitter;
+        return Math.min(delay, 120_000L);
+    }
+
+    private boolean isRetryableFailure(String label, String output) {
+        if (output == null) return true;
+        String o = output.toLowerCase(Locale.ROOT);
+
+        if (o.contains("etimedout")
+                || o.contains("econnreset")
+                || o.contains("eai_again")
+                || o.contains("socket hang up")
+                || o.contains("tls handshake timeout")
+                || o.contains("network")
+                || o.contains("timed out")
+                || o.contains("response code 429")
+                || o.contains("response code 502")
+                || o.contains("response code 503")
+                || o.contains("response code 504")
+                || o.contains("http 429")
+                || o.contains("http 502")
+                || o.contains("http 503")
+                || o.contains("http 504")) {
+            return true;
+        }
+
+        if (label != null && label.toLowerCase(Locale.ROOT).contains("wineboot")) {
+            return o.contains("err") || o.contains("failed") || o.contains("busy");
+        }
+
+        return false;
+    }
+
+    private static boolean isSignificantLogLine(String line) {
+        if (line == null) return false;
+        String l = line.toLowerCase(Locale.ROOT);
+        return l.contains("error") || l.contains(" err ") || l.contains("err!") ||
+               l.contains("failed") || l.contains("cannot") || l.contains("exception") ||
+               l.contains("warn") || l.startsWith(">");
     }
 
     private String[] command(String executable, String... args) {
@@ -373,7 +631,33 @@ public class BuildService {
         return isWindows() ? executable + ".cmd" : executable;
     }
 
+    /**
+     * Returns the absolute path to the JS entry-point behind a .bin/ symlink.
+     * Using the resolved path with 'node' bypasses noexec tmpfs restrictions:
+     * node reads JS files (read syscall) rather than exec()-ing them.
+     */
+    private String resolveNodeBinEntry(Path workspace, String binName) throws IOException {
+        Path binLink = workspace.resolve("node_modules").resolve(".bin").resolve(binName);
+        if (!Files.exists(binLink, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException(binName + " not found in node_modules/.bin/ — run npm install first");
+        }
+        if (Files.isSymbolicLink(binLink)) {
+            return binLink.toRealPath().toString();
+        }
+        return binLink.toAbsolutePath().toString();
+    }
+
     private BuildTarget resolveBuildTarget() {
+        return resolveBuildTarget(null);
+    }
+
+    private BuildTarget resolveBuildTarget(ConversionProject project) {
+        // 1. Per-project preference (set by user in wizard)
+        if (project != null && project.getTargetPlatform() != null && !project.getTargetPlatform().isBlank()) {
+            BuildTarget projectTarget = BuildTarget.fromAlias(project.getTargetPlatform().trim().toLowerCase(Locale.ROOT));
+            if (projectTarget != null) return projectTarget;
+        }
+        // 2. Env-var / application.yml override
         String requested = targetPlatform == null ? "" : targetPlatform.trim().toLowerCase(Locale.ROOT);
         if (!requested.isBlank() && !"auto".equals(requested)) {
             BuildTarget explicitTarget = BuildTarget.fromAlias(requested);
@@ -382,6 +666,7 @@ public class BuildService {
             }
             log.warn("Unknown build target platform '{}', falling back to auto detection", targetPlatform);
         }
+        // 3. Auto-detect from server OS (Linux in Docker → LINUX)
         return isWindows() ? BuildTarget.WIN : BuildTarget.LINUX;
     }
 
@@ -480,24 +765,47 @@ public class BuildService {
         project.setBuildError(error);
         project.setBuildArtifactPath(null);
         repository.save(project);
+
+        // Record failed build
+        long failDurationMs = project.getBuildStartedAt() != null
+                ? Instant.now().toEpochMilli() - project.getBuildStartedAt().toEpochMilli() : 0;
+        buildMetricsService.save(BuildRecord.builder()
+                .projectId(project.getId())
+                .projectName(project.getProjectName())
+                .userEmail(project.getCreatedBy())
+                .tier(project.getTier() != null ? project.getTier() : LicenseTier.TRIAL)
+                .result("FAILED")
+                .buildError(error)
+                .buildTarget(resolveBuildTarget(project).cliValue)
+                .enabledModules(project.getEnabledModules())
+                .completedAt(Instant.now())
+                .durationMs(failDurationMs)
+                .build());
+
         emitProgress(project.getId(), "FAILED", error);
     }
 
     private void emitProgress(String projectId, String progress, String message) {
-        List<SseEmitter> projectEmitters = emitters.get(projectId);
-        if (projectEmitters == null || projectEmitters.isEmpty()) return;
+        try {
+            List<SseEmitter> projectEmitters = emitters.get(projectId);
+            if (projectEmitters == null || projectEmitters.isEmpty()) return;
 
-        List<SseEmitter> dead = new ArrayList<>();
-        for (SseEmitter emitter : projectEmitters) {
-            try {
-                emitter.send(SseEmitter.event()
-                        .name("progress")
-                        .data(Map.of("progress", progress, "message", message)));
-            } catch (Exception e) {
-                dead.add(emitter);
+            // Snapshot to avoid ConcurrentModificationException if a client connects/drops mid-send
+            List<SseEmitter> snapshot = List.copyOf(projectEmitters);
+            List<SseEmitter> dead = new ArrayList<>();
+            for (SseEmitter emitter : snapshot) {
+                try {
+                    emitter.send(SseEmitter.event()
+                            .name("progress")
+                            .data(Map.of("progress", progress, "message", message)));
+                } catch (Exception e) {
+                    dead.add(emitter);
+                }
             }
+            projectEmitters.removeAll(dead);
+        } catch (Exception ignored) {
+            log.debug("emitProgress swallowed exception for project {}: {}", projectId, ignored.getMessage());
         }
-        projectEmitters.removeAll(dead);
     }
 
     private void removeEmitter(String projectId, SseEmitter emitter) {
@@ -511,229 +819,127 @@ public class BuildService {
     // ─── Electron File Generators ────────────────────────
 
     private Map<String, String> generateFiles(ConversionProject project) {
+        LicenseTier tier = project.getTier() != null ? project.getTier() : LicenseTier.TRIAL;
+        List<String> resolved = moduleRegistry.resolveEnabledModules(project.getEnabledModules(), tier, developmentBuild);
+
+        StringBuilder requires = new StringBuilder();
+        StringBuilder setups = new StringBuilder();
+        for (String key : resolved) {
+            String varName = key.replace('-', '_');
+            requires.append("const ").append(varName)
+                    .append(" = require('./modules/").append(key).append("');\n");
+            setups.append("  ").append(varName).append(".setup(mainWindow, config);\n");
+        }
+
+        String modulesJson = resolved.isEmpty() ? "[]"
+                : "[\"" + String.join("\",\"", resolved) + "\"]"; 
+
+        Map<String, Object> ctx = new HashMap<>();
+        ctx.put("projectName",   project.getProjectName());
+        ctx.put("npmPackageName", sanitizeNpmPackageName(project.getProjectName()));
+        ctx.put("appId", buildAppId(project.getProjectName()));
+        ctx.put("currentVersion", project.getCurrentVersion() != null ? project.getCurrentVersion() : "1.0.0");
+        ctx.put("appTitle",       project.getAppTitle());
+        ctx.put("websiteUrl",     project.getWebsiteUrl());
+        ctx.put("iconFile",       project.getIconFile() != null ? project.getIconFile() : "icon.ico");
+        ctx.put("modulesJson",    modulesJson);
+        ctx.put("hasModules",      !resolved.isEmpty());
+        ctx.put("hasScreenProtect", resolved.contains("screen-protect"));
+        ctx.put("moduleRequires",  requires.toString());
+        ctx.put("moduleSetups",    setups.toString());
+
+        // Build-target context — drives platform-specific section in package.mustache
+        BuildTarget target = resolveBuildTarget(project);
+        ctx.put("isWin",   target == BuildTarget.WIN);
+        ctx.put("isLinux", target == BuildTarget.LINUX);
+        ctx.put("isMac",   target == BuildTarget.MAC);
+        ctx.put("linuxTarget", linuxTarget);
+
         Map<String, String> files = new LinkedHashMap<>();
-        files.put("config.js", generateConfigJs(project));
-        files.put("main.js", generateMainJs());
-        files.put("preload.js", generatePreloadJs());
-        files.put("package.json", generatePackageJson(project));
+        files.put("config.js",    templateEngine.render("config.mustache",  ctx));
+        files.put("main.js",      templateEngine.render("main.mustache",    ctx));
+        files.put("preload.js",   templateEngine.render("preload.mustache", ctx));
+        files.put("package.json", templateEngine.render("package.mustache", ctx));
+
+        for (String key : resolved) {
+            moduleRegistry.get(key).ifPresent(def ->
+                    files.put("modules/" + key + ".js",
+                            templateEngine.render(def.templateFile(), Map.of())));
+        }
+
+        log.debug("Generated {} files ({} modules) for project '{}'",
+                files.size(), resolved.size(), project.getProjectName());
         return files;
     }
 
-    private String generateConfigJs(ConversionProject project) {
-        return """
-                // Generated by WebToDesk Conversion Service
-                module.exports = {
-                  projectName: '%s',
-                  currentVersion: '%s',
-                  appTitle: '%s',
-                  websiteUrl: '%s',
-                  iconFile: '%s'
-                };
-                """.formatted(
-                project.getProjectName(),
-                project.getCurrentVersion(),
-                project.getAppTitle(),
-                project.getWebsiteUrl(),
-                project.getIconFile()
-        );
+    private static Integer parseMajorVersion(String version) {
+        if (version == null) return null;
+        String trimmed = version.trim();
+        if (trimmed.startsWith("v")) trimmed = trimmed.substring(1);
+        int dot = trimmed.indexOf('.');
+        String major = dot >= 0 ? trimmed.substring(0, dot) : trimmed;
+        try {
+            return Integer.parseInt(major);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
-    private String generateMainJs() {
-        return """
-                const { app, BrowserWindow, globalShortcut, ipcMain, shell } = require('electron');
-                const path = require('path');
-                const { appTitle, websiteUrl, iconFile } = require('./config');
-
-                async function createWindow() {
-                  const getIconPath = () =>
-                    path.join(__dirname, 'build',
-                      process.platform === 'darwin' ? 'icon.icns' :
-                      process.platform === 'win32'  ? iconFile : 'icon.png');
-
-                  const mainWindow = new BrowserWindow({
-                    width: 1200,
-                    height: 800,
-                    title: appTitle,
-                    icon: getIconPath(),
-                    webPreferences: {
-                      nodeIntegration: false,
-                      contextIsolation: true,
-                      enableRemoteModule: false,
-                      preload: path.join(__dirname, 'preload.js')
-                    }
-                  });
-
-                  mainWindow.loadURL(websiteUrl).catch(err => {
-                    console.error('Failed to load URL:', err.message);
-                  });
-
-                  mainWindow.webContents.on('page-title-updated', event => {
-                    event.preventDefault();
-                    mainWindow.setTitle(appTitle);
-                  });
-
-                  if (process.platform === 'darwin' || process.platform === 'win32') {
-                    mainWindow.setContentProtection(true);
-                  }
-
-                  mainWindow.webContents.on('devtools-opened', () => {
-                    mainWindow.webContents.closeDevTools();
-                  });
-
-                  mainWindow.setMenuBarVisibility(false);
-
-                  const registerShortcuts = () => {
-                    const shortcuts = [
-                      'PrintScreen', 'Alt+PrintScreen', 'Super+Shift+S',
-                      'Super+PrintScreen', 'Command+Shift+3',
-                      'Command+Shift+4', 'Command+Shift+5'
-                    ];
-                    shortcuts.forEach(shortcut => {
-                      globalShortcut.register(shortcut, () => {
-                        if (mainWindow?.isDestroyed?.()) return;
-                        mainWindow.webContents.send('trigger-protection');
-                      });
-                    });
-                  };
-
-                  registerShortcuts();
-                  mainWindow.on('focus', registerShortcuts);
-                  mainWindow.on('blur', () => globalShortcut.unregisterAll());
-                }
-
-                app.whenReady().then(createWindow);
-
-                app.on('will-quit', () => globalShortcut.unregisterAll());
-
-                app.on('window-all-closed', () => {
-                  if (process.platform !== 'darwin') app.quit();
-                });
-
-                app.on('activate', () => {
-                  if (!BrowserWindow.getAllWindows().length) createWindow();
-                });
-
-                ipcMain.on('open-external', (event, url) => shell.openExternal(url));
-                """;
+    private static String sanitizeNpmPackageName(String projectName) {
+        String base = projectName == null ? "" : projectName.trim().toLowerCase(Locale.ROOT);
+        base = base.replaceAll("\\s+", "-");
+        base = base.replaceAll("[^a-z0-9._-]", "-");
+        base = base.replaceAll("-{2,}", "-");
+        base = base.replaceAll("^[._-]+", "");
+        base = base.replaceAll("[._-]+$", "");
+        if (base.isBlank()) return "webtodesk-app";
+        if (base.length() > 214) return base.substring(0, 214);
+        return base;
     }
 
-    private String generatePreloadJs() {
-        return """
-                const { contextBridge, ipcRenderer } = require('electron');
-
-                contextBridge.exposeInMainWorld('electronAPI', {
-                  openExternal: url => ipcRenderer.send('open-external', url)
-                });
-
-                (function initializeProtectionUI() {
-                  const blackout = document.createElement('div');
-                  blackout.style.cssText = `
-                    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                    background: linear-gradient(to bottom, #000000, #1a1a1a);
-                    z-index: 10001; display: none; pointer-events: none;
-                    opacity: 0; transition: opacity 0.3s ease-in-out;
-                  `;
-                  document.body.appendChild(blackout);
-
-                  const timerDisplay = document.createElement('div');
-                  timerDisplay.style.cssText = `
-                    position: absolute; top: 60%; left: 50%;
-                    transform: translate(-50%, -50%); color: #ffffff;
-                    font-size: 24px; z-index: 10003; font-family: Arial, sans-serif;
-                    opacity: 0; transition: opacity 0.3s ease-in-out;
-                  `;
-                  blackout.appendChild(timerDisplay);
-
-                  const snackbar = document.createElement('div');
-                  snackbar.textContent = 'Screenshots and recordings are not allowed.';
-                  snackbar.style.cssText = `
-                    position: fixed; top: 50%; left: 50%;
-                    transform: translate(-50%, -50%); background-color: #d32f2f;
-                    color: white; padding: 20px 40px; border-radius: 12px;
-                    z-index: 10002; opacity: 0; transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
-                    display: none; font-size: 20px; text-align: center;
-                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5); font-family: Arial, sans-serif;
-                  `;
-                  document.body.appendChild(snackbar);
-
-                  let isProtectionActive = false;
-                  let protectionTimer = null;
-
-                  const flashBorder = () => {
-                    document.body.style.border = '8px solid red';
-                    let flashCount = 0;
-                    const flashInterval = setInterval(() => {
-                      document.body.style.borderColor = flashCount % 2 ? 'transparent' : 'red';
-                      if (++flashCount >= 8) {
-                        clearInterval(flashInterval);
-                        document.body.style.border = 'none';
-                      }
-                    }, 150);
-                  };
-
-                  const triggerProtection = () => {
-                    if (isProtectionActive) return;
-                    isProtectionActive = true;
-                    blackout.style.display = 'block';
-                    blackout.style.opacity = '1';
-                    snackbar.style.display = 'block';
-                    snackbar.style.opacity = '1';
-                    snackbar.style.transform = 'translate(-50%, -50%) scale(1.05)';
-                    setTimeout(() => { snackbar.style.transform = 'translate(-50%, -50%) scale(1)'; }, 300);
-                    timerDisplay.style.opacity = '1';
-                    flashBorder();
-                    let timeLeft = 10;
-                    timerDisplay.textContent = `Resuming in ${timeLeft}...`;
-                    protectionTimer = setInterval(() => {
-                      timerDisplay.textContent = `Resuming in ${--timeLeft}...`;
-                      if (timeLeft <= 0) {
-                        clearInterval(protectionTimer);
-                        snackbar.style.opacity = blackout.style.opacity = timerDisplay.style.opacity = '0';
-                        setTimeout(() => {
-                          snackbar.style.display = blackout.style.display = 'none';
-                          isProtectionActive = false;
-                        }, 300);
-                      }
-                    }, 1000);
-                  };
-
-                  ipcRenderer.on('trigger-protection', triggerProtection);
-                })();
-                """;
+    private static String buildAppId(String projectName) {
+        String base = projectName == null ? "" : projectName.trim().toLowerCase(Locale.ROOT);
+        base = base.replaceAll("[^a-z0-9]+", ".");
+        base = base.replaceAll("\\.{2,}", ".");
+        base = base.replaceAll("^\\.+", "");
+        base = base.replaceAll("\\.+$", "");
+        if (base.isBlank()) return "com.webtodesk.app";
+        return "com.webtodesk." + base;
     }
 
-    private String generatePackageJson(ConversionProject project) {
-        return """
-                {
-                  "name": "%s",
-                  "version": "%s",
-                  "description": "Desktop app for %s",
-                  "main": "main.js",
-                  "scripts": {
-                    "start": "electron .",
-                    "dist": "electron-builder --publish=never"
-                  },
-                  "devDependencies": {
-                    "electron": "^38.2.2",
-                    "electron-builder": "^26.0.12"
-                  },
-                  "build": {
-                    "appId": "com.%s.app",
-                    "productName": "%s",
-                    "directories": { "output": "dist" },
-                    "files": ["main.js", "preload.js", "config.js"],
-                    "win": { "target": "nsis" },
-                    "mac": { "category": "public.app-category.utilities" },
-                    "linux": { "target": "AppImage" }
-                  }
-                }
-                """.formatted(
-                project.getProjectName(),
-                project.getCurrentVersion(),
-                project.getAppTitle(),
-                project.getProjectName(),
-                project.getAppTitle()
-        );
+    private static String truncateForStorage(String text, int maxChars) {
+        if (text == null) return "";
+        if (text.length() <= maxChars) return text;
+        return text.substring(text.length() - maxChars);
+    }
+
+    private Map<String, String> buildEnvironmentOverridesFor(BuildTarget target) {
+        if (target == null) return Map.of();
+        if (target != BuildTarget.WIN || isWindows()) return Map.of();
+
+        Map<String, String> overrides = new HashMap<>();
+        overrides.put("WINEDEBUG", "-all");
+
+        String winePrefix = "/tmp/wine-prefix";
+        overrides.putIfAbsent("WINEPREFIX", winePrefix);
+        overrides.putIfAbsent("WINEARCH", "win64");
+
+        try {
+            Files.createDirectories(Paths.get(winePrefix));
+        } catch (Exception ignored) {}
+        return overrides;
+    }
+
+    private boolean isLibFuse2Available() {
+        try {
+            if (Files.exists(Paths.get("/lib/x86_64-linux-gnu/libfuse.so.2"))) return true;
+            if (Files.exists(Paths.get("/usr/lib/x86_64-linux-gnu/libfuse.so.2"))) return true;
+            if (Files.exists(Paths.get("/lib/libfuse.so.2"))) return true;
+            if (Files.exists(Paths.get("/usr/lib/libfuse.so.2"))) return true;
+        } catch (Exception ignored) {
+            return false;
+        }
+        return false;
     }
 
     private enum BuildTarget {

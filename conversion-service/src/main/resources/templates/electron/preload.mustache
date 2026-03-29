@@ -1,0 +1,82 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  openExternal: url => ipcRenderer.send('open-external', url)
+});
+
+{{#hasScreenProtect}}
+(function initializeProtectionUI() {
+  const blackout = document.createElement('div');
+  blackout.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: linear-gradient(to bottom, #000000, #1a1a1a);
+    z-index: 10001; display: none; pointer-events: none;
+    opacity: 0; transition: opacity 0.3s ease-in-out;
+  `;
+  document.body.appendChild(blackout);
+
+  const timerDisplay = document.createElement('div');
+  timerDisplay.style.cssText = `
+    position: absolute; top: 60%; left: 50%;
+    transform: translate(-50%, -50%); color: #ffffff;
+    font-size: 24px; z-index: 10003; font-family: Arial, sans-serif;
+    opacity: 0; transition: opacity 0.3s ease-in-out;
+  `;
+  blackout.appendChild(timerDisplay);
+
+  const snackbar = document.createElement('div');
+  snackbar.textContent = 'Screenshots and recordings are not allowed.';
+  snackbar.style.cssText = `
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%); background-color: #d32f2f;
+    color: white; padding: 20px 40px; border-radius: 12px;
+    z-index: 10002; opacity: 0; transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+    display: none; font-size: 20px; text-align: center;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5); font-family: Arial, sans-serif;
+  `;
+  document.body.appendChild(snackbar);
+
+  let isProtectionActive = false;
+  let protectionTimer = null;
+
+  const flashBorder = () => {
+    document.body.style.border = '8px solid red';
+    let flashCount = 0;
+    const flashInterval = setInterval(() => {
+      document.body.style.borderColor = flashCount % 2 ? 'transparent' : 'red';
+      if (++flashCount >= 8) {
+        clearInterval(flashInterval);
+        document.body.style.border = 'none';
+      }
+    }, 150);
+  };
+
+  const triggerProtection = () => {
+    if (isProtectionActive) return;
+    isProtectionActive = true;
+    blackout.style.display = 'block';
+    blackout.style.opacity = '1';
+    snackbar.style.display = 'block';
+    snackbar.style.opacity = '1';
+    snackbar.style.transform = 'translate(-50%, -50%) scale(1.05)';
+    setTimeout(() => { snackbar.style.transform = 'translate(-50%, -50%) scale(1)'; }, 300);
+    timerDisplay.style.opacity = '1';
+    flashBorder();
+    let timeLeft = 10;
+    timerDisplay.textContent = `Resuming in ${timeLeft}...`;
+    protectionTimer = setInterval(() => {
+      timerDisplay.textContent = `Resuming in ${--timeLeft}...`;
+      if (timeLeft <= 0) {
+        clearInterval(protectionTimer);
+        snackbar.style.opacity = blackout.style.opacity = timerDisplay.style.opacity = '0';
+        setTimeout(() => {
+          snackbar.style.display = blackout.style.display = 'none';
+          isProtectionActive = false;
+        }, 300);
+      }
+    }, 1000);
+  };
+
+  ipcRenderer.on('trigger-protection', triggerProtection);
+})();
+{{/hasScreenProtect}}
