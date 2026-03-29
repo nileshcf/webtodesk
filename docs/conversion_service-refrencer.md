@@ -6,15 +6,20 @@
 |---|---|
 | **Platform Type** | SaaS — Website to Native Desktop App Converter |
 | **Core Runtime** | Electron (Chromium + Node.js) |
-| **Target OS** | macOS (primary) · Windows · Linux (roadmap) |
-| **Frontend** | HTML5 · CSS3 · JavaScript (Vanilla) |
-| **Backend** | PHP / Laravel · Firebase · Netlify / Vercel |
-| **Billing** | Paddle (Merchant of Record) |
+| **Target OS** | Windows · Linux · macOS (host-dependent build target) |
+| **Frontend** | React 19 · TypeScript · Vite |
+| **Backend** | Java 17 + Spring Boot 3.3 |
+| **Billing** | Deferred |
 | **Document** | March 2026 — Internal Reference & Roadmap |
 
 *Inspired by: Appilix mobile architecture | Built on: Electron + electron-builder | Ref repos: nileshcf/webtodesk · thecheesybit/desktop_app_project*
 
 ---
+
+> ⚠️ **Alignment Note (Current Codebase Wins):**
+> This file contains roadmap/vision material. For implementation truth, use current Java/Spring controllers/services and `skills/conversion-service.md`.
+> Current runtime flow is local `ProcessBuilder` build orchestration + R2 upload + SSE status updates.
+> Payment/subscription gateway wiring is intentionally deferred until core tiered build/test flows are complete.
 
 ## 01 Executive Summary
 
@@ -24,7 +29,7 @@ The technology foundation is Electron — the same framework powering VS Code, S
 
 > **Core Insight:** The average website owner cannot create a desktop app. Building one manually requires Electron knowledge, Node.js, a build toolchain, code signing certificates, CI/CD, and update infrastructure. WebToDesk collapses all of this into a 3-step web form. The same insight drove Appilix to $50K+ customers on mobile — the desktop opportunity is equally large and far less competitive.
 
-The platform is built using familiar, low-cost, fast-to-deploy technologies: PHP/Laravel for the backend, HTML/JS/CSS for the dashboard frontend, Firebase for real-time job status and auth, Netlify/Vercel for static hosting, and Paddle for global billing. Build agents run on cloud VMs executing Electron-builder to compile platform-specific binaries on demand.
+The platform is currently implemented as a Java Spring Boot microservices backend with a React/Vite frontend. Build orchestration runs inside `conversion-service` using local ProcessBuilder execution (`npm install` + `electron-builder`) and uploads artifacts to Cloudflare R2. Real-time build feedback is delivered via SSE endpoints, with billing integration intentionally deferred for the current testing phase.
 
 ---
 
@@ -34,47 +39,27 @@ The platform is built using familiar, low-cost, fast-to-deploy technologies: PHP
 
 | Step | Name | Description |
 |------|------|-------------|
-| **Step 1** | Create | User visits webtodesk.app, signs up (Firebase Auth), and pastes their website URL into the dashboard. The system performs a URL health-check (HTTP fetch) to confirm the site is reachable and mobile-friendly. |
+| **Step 1** | Create | Authenticated user uses dashboard, creates a conversion project, and provides website URL plus metadata. |
 | **Step 2** | Configure | User fills out app metadata: App Name, App ID (e.g. `com.mybrand.app`), Window size/min-size, custom icon (512×512 PNG), splash screen, and selects which native Modules to enable. |
-| **Step 3** | Choose Platform | User selects macOS (`.dmg`), Windows (`.exe` installer), or both. Platform selection determines which build agent and code signing path is used. |
-| **Step 4** | Build | Dashboard sends a build job to the backend queue. A cloud build agent picks it up, injects user config into the Electron template, runs electron-builder, and uploads the resulting installer to CDN storage. |
-| **Step 5** | Download | Firebase Realtime Database signals the dashboard when the build is complete. User sees a download button + direct installer URL. For auto-updates, a Hazel update server URL is also provided. |
+| **Step 3** | Choose Tier + Modules | User selects a tier view (Free/TRIAL, STARTER, PRO) and module set; tier-gated modules are validated in backend. |
+| **Step 4** | Build | Dashboard triggers async build in conversion-service (`/conversions/{id}/build` or `/build/trigger`); service runs local build and uploads artifact to R2. |
+| **Step 5** | Monitor + Download | UI reads status via SSE/polling endpoints; when status is `READY`, user downloads from R2 redirect endpoint. |
 
 ### System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│              USER BROWSER (Netlify/Vercel)              │
-│   HTML Dashboard → Firebase Auth → Config Form → Build  │
-└─────────────────────────────────────────────────────────┘
-                       │ HTTPS POST /api/build
-                       ▼
-┌─────────────────────────────────────────────────────────┐
-│          BACKEND API (PHP Laravel / Vercel Functions)   │
-│    Validate config → Save to DB → Enqueue job → job_id  │
-└─────────────────────────────────────────────────────────┘
-                       │ Queue (Redis / Firebase RTDB)
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-   ┌────────────┐ ┌──────────┐ ┌──────────┐
-   │  macOS VM  │ │Windows VM│ │ Linux VM │
-   │   Xcode    │ │electron- │ │electron- │
-   │  builder   │ │ builder  │ │ builder  │
-   └────────────┘ └──────────┘ └──────────┘
-          │            │            │
-          └────────────┴────────────┘
-                       │ Upload artifact
-                       ▼
-          ┌────────────────────────┐
-          │     CDN / S3 Storage   │
-          │  .dmg / .exe / .AppImage│
-          └────────────────────────┘
-                       │ Signed download URL
-                       ▼
-          ┌────────────────────────┐
-          │   Firebase RTDB update │
-          │   → Dashboard notified │
-          └────────────────────────┘
+Browser (React/Vite)
+  │
+  ├─ /user/**       → API Gateway (:8080) → user-service (:8081)
+  └─ /conversion/** → API Gateway (:8080) → conversion-service (:8082)
+
+conversion-service build path:
+  1) validate environment
+  2) create temp workspace
+  3) write Electron template files + selected modules
+  4) run npm install + electron-builder
+  5) upload artifact to Cloudflare R2
+  6) emit status/log updates via SSE + status endpoints
 ```
 
 ---
@@ -98,22 +83,17 @@ The platform is built using familiar, low-cost, fast-to-deploy technologies: PHP
 
 | Layer | Technology | Notes |
 |-------|-----------|-------|
-| API Backend | PHP 8.x / Laravel 11 | REST API for user auth, app config CRUD, build job submission. Deployed on shared VPS or Railway.app |
-| Job Queue | Redis + Laravel Queues | Async build job processing. `build:dispatch` → Redis queue → Worker picks up → runs build script |
-| Database | MySQL 8 (via PlanetScale) | Users, apps, builds, module configs, subscription status |
+| API Backend | Java 17 + Spring Boot 3.3 | Multi-service backend (`api-gateway`, `user-service`, `conversion-service`, `discovery-service`) |
+| Build Orchestration | conversion-service `BuildService` | Async local ProcessBuilder flow with retries, timeout, and build log capture |
+| Queueing | In-process build queue services | Priority/normal queue tracking via service layer |
+| Databases | PostgreSQL + MongoDB + Redis | User/auth in PostgreSQL, conversion/build docs in MongoDB, token blacklist/cache in Redis |
 | File Storage | AWS S3 / Cloudflare R2 | Stores uploaded icons, splash images, and compiled `.dmg/.exe/.AppImage` artifacts with signed URLs |
-| CDN | Cloudflare | Static assets + artifact download acceleration. R2 + CDN = near-zero egress cost |
-| Auth | Firebase Authentication | Email/password + Google Sign-In for dashboard login. JWT tokens validated by Laravel backend |
-| Realtime | Firebase Realtime Database | Build job status (queued → building → done/failed) pushed to dashboard in real time without polling |
-| Build Agents | GitHub Actions / DigitalOcean Droplets | macOS: GitHub Actions macOS runner. Windows/Linux: DigitalOcean Droplets with persistent Electron SDK |
-| Frontend Host | Netlify / Vercel | Static HTML/CSS/JS dashboard hosted for free. API calls proxied to Laravel backend |
-| Billing | Paddle | Merchant of Record — handles VAT, global tax, subscriptions, refunds. Paddle.js checkout overlay in dashboard |
+| Realtime | SSE + status polling endpoints | Build progress streamed from backend (`/conversions/{id}/build/stream` and `/build/progress/{projectId}`) |
+| Build Agents | Local host/container runtime | Build target resolves based on host/platform config |
+| Frontend Host | Vite dev + standard static deploy options | React dashboard served by Vite in development |
+| Billing | Deferred | License tiers exist; payment gateway integration intentionally deferred |
 | Email | Resend / Mailgun | Transactional: signup, build complete, password reset. Template-based HTML emails |
-| Monitoring | Sentry + UptimeRobot | Error tracking for Laravel + Electron. Uptime alerts for API and build agents |
-
-### 3.3 macOS Build Agent (Critical Path)
-
-> **Why macOS Matters:** macOS `.dmg` creation and Apple code signing can **ONLY** be done on macOS (Apple restriction). GitHub Actions provides free macOS runners for public repos (`macos-latest`). For private/production use, a dedicated macOS VM on MacStadium or a GitHub Actions self-hosted runner is needed. Windows builds **CAN** be done on Linux using Wine+cross-compile or a Windows VM.
+| Monitoring | In progress | Basic logs/health available; observability hardening planned |
 
 ---
 
@@ -174,7 +154,7 @@ webtodesk-template/
 
 ### Core File: `main.js`
 
-```js
+```javascript
 const { app, BrowserWindow, session, ipcMain, Notification, shell } = require('electron')
 const { setupModules } = require('./modules/loader')
 const config = require('./user-config.json')
@@ -210,6 +190,8 @@ app.whenReady().then(createWindow)
 
 ## 05 Native Module System — Complete Implementation
 
+> ℹ️ **Scope note:** this section mixes currently implemented modules and roadmap modules. For exact live module availability by tier, use backend endpoint `GET /conversion/build/modules?tier=TRIAL|STARTER|PRO|LIFETIME`.
+
 Modules are the heart of the WebToDesk value proposition. Each module is an optional Node.js file that hooks into Electron's main process APIs to add native OS capabilities beyond what a browser can offer. Modules are enabled/disabled per user config and tree-shaken out of the build if not enabled.
 
 ---
@@ -218,7 +200,7 @@ Modules are the heart of the WebToDesk value proposition. Each module is an opti
 
 Prevents screenshots, screen recording (QuickTime, OBS), and AirPlay mirroring of the app window.
 
-```js
+```javascript
 mainWindow.setContentProtection(true) // macOS + Windows
 // On macOS: uses NSWindow setContentProtectionEnabled
 // On Windows: WDA_EXCLUDEFROMCAPTURE via SetWindowDisplayAffinity
@@ -232,7 +214,7 @@ mainWindow.setContentProtection(true) // macOS + Windows
 
 Locks the app on launch or resume. Shows a native auth prompt (Touch ID, Face ID on Mac; Windows Hello, fingerprint on Windows). The website is hidden until auth succeeds.
 
-```js
+```javascript
 // macOS: systemPreferences.promptTouchID(reason)
 // Windows: node-windows-hello npm package
 // Fallback: password dialog via dialog.showInputBox
@@ -247,7 +229,7 @@ Locks the app on launch or resume. Shows a native auth prompt (Touch ID, Face ID
 
 Delivers push notifications to the desktop app from any server using Firebase Cloud Messaging.
 
-```js
+```javascript
 // 1. App registers with FCM → gets device token
 // 2. Token stored in Firebase RTDB under user's app
 // 3. Backend calls FCM HTTP v1 API with token + payload
@@ -264,7 +246,7 @@ notif.on('click', () => mainWindow.loadURL(payload.clickUrl))
 
 Registers a custom URL protocol (e.g. `myapp://`) so clicking links in emails, browsers, or other apps opens the desktop app and navigates to a specific page.
 
-```js
+```javascript
 // Register protocol on install:
 app.setAsDefaultProtocolClient('myapp')
 
@@ -285,7 +267,7 @@ app.on('second-instance', (event, argv) => {
 
 Shows a branded offline error screen when the device has no internet. Optionally caches the last-visited page.
 
-```js
+```javascript
 require('electron').net.isOnline()
 // On 'offline' event: mainWindow.loadFile('renderer/offline.html')
 // On 'online' event: reload original URL
@@ -298,7 +280,7 @@ require('electron').net.isOnline()
 
 Shows a login/register page hosted on WebToDesk's renderer before loading the website.
 
-```js
+```javascript
 mainWindow.loadFile('renderer/auth-screen.html')
 // auth-screen.html calls: window.electronAPI.authComplete(token)
 // main.js receives IPC → loads website with auth cookie injected:
@@ -311,7 +293,7 @@ session.defaultSession.cookies.set({ url, name, value })
 
 Shows a numeric badge on the macOS Dock icon or Windows taskbar.
 
-```js
+```javascript
 // Website JS calls:
 window.electronAPI.setBadge(5)
 
@@ -326,116 +308,11 @@ ipcMain.on('set-badge', (_, n) => app.setBadgeCount(n))
 
 ---
 
-### 🖥️ System Tray `[Free]`
-
-Places the app in the system tray. App can minimise to tray and be restored without appearing in Dock/Taskbar.
-
-```js
-const { Tray, Menu } = require('electron')
-const tray = new Tray(path.join(__dirname, 'assets/tray-icon.png'))
-tray.setContextMenu(Menu.buildFromTemplate([
-  { label: 'Open', click: () => mainWindow.show() },
-  { label: 'Quit', click: () => app.quit() }
-]))
-mainWindow.on('minimize', () => mainWindow.hide())
-```
-
----
-
-### 🎨 CSS/JS Injection `[Free]`
-
-Injects custom CSS or JavaScript into every page the WebView loads.
-
-```js
-mainWindow.webContents.on('did-finish-load', () => {
-  mainWindow.webContents.insertCSS(config.customCSS)
-  mainWindow.webContents.executeJavaScript(config.customJS)
-})
-```
-
----
-
-### 🖨️ Print Support `[Free]`
-
-```js
-// In menu.js:
-{ label: 'Print', accelerator: 'CmdOrCtrl+P',
-  click: () => mainWindow.webContents.print() }
-
-// Print to PDF:
-mainWindow.webContents.printToPDF({}).then(data =>
-  fs.writeFile(savePath, data))
-```
-
----
-
-### ⬅️ Navigation Controls `[Free]`
-
-```js
-const toolbar = new BrowserView()
-app.addBrowserView(toolbar)
-toolbar.webContents.loadFile('renderer/toolbar.html')
-ipcMain.on('nav-back', () => mainWindow.webContents.goBack())
-```
-
----
-
-### 🔂 Single Instance Lock `[Free]`
-
-```js
-const gotLock = app.requestSingleInstanceLock()
-if (!gotLock) { app.quit() }
-app.on('second-instance', () => {
-  if (mainWindow.isMinimized()) mainWindow.restore()
-  mainWindow.focus()
-})
-```
-
----
-
-### 🔍 Zoom Controls `[Free]`
-
-```js
-{ role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }
-
-// Persist zoom:
-const store = new Store()
-mainWindow.webContents.setZoomFactor(store.get('zoom', 1))
-mainWindow.webContents.on('zoom-changed', () => {
-  store.set('zoom', mainWindow.webContents.getZoomFactor())
-})
-```
-
----
-
-### 🛡️ Content Security Policy `[Pro]`
-
-```js
-session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
-  cb({ responseHeaders: {
-    ...details.responseHeaders,
-    'Content-Security-Policy': ["default-src 'self' " + config.websiteUrl]
-  }})
-})
-```
-
----
-
-### 📊 Analytics Bridge `[Pro]`
-
-```js
-app.on('ready', () => analytics.logEvent('app_open', { appId }))
-mainWindow.webContents.on('did-navigate', (_, url) =>
-  analytics.logEvent('page_view', { url }))
-```
-
----
-
 ### 🪟 Window Switcher Protection `[Pro]`
 
 Replaces the app thumbnail in Alt+Tab / Mission Control with a custom privacy screen.
 
-```js
+```javascript
 // macOS: setContentProtection(true) hides Mission Control preview
 // Windows: SetWindowDisplayAffinity WDA_EXCLUDEFROMCAPTURE
 // Custom: on 'hide' event, briefly show a splash BrowserWindow
@@ -445,7 +322,7 @@ Replaces the app thumbnail in Alt+Tab / Mission Control with a custom privacy sc
 
 ### ⌨️ Global Shortcuts `[Free]`
 
-```js
+```javascript
 const { globalShortcut } = require('electron')
 app.on('ready', () => {
   globalShortcut.register('CommandOrControl+Shift+Space', () => {
@@ -460,20 +337,18 @@ app.on('ready', () => {
 ## 06 Build Pipeline — Step by Step
 
 ### Phase 1 — Config Validation & Job Creation
-- Backend receives `POST /api/build` with `user_id`, app config JSON
-- Validates: URL reachable, `appId` format (`com.brand.app`), icon is valid PNG ≥512px
-- Creates build record in MySQL: `{id, user_id, status:'queued', platform, config_json}`
-- Dispatches job to Redis queue: `BuildElectronApp::dispatch($build_id)`
-- Returns `job_id` to frontend; Firebase RTDB node `builds/{job_id}/status = 'queued'`
+- Backend receives `POST /conversion/conversions/{id}/build` or `POST /conversion/build/trigger`
+- Validates project/tier and build preconditions
+- Marks project `BUILDING`, stores build metadata, and starts async flow
+- Emits initial progress (`PREPARING`) via SSE/status endpoints
 
 ### Phase 2 — Template Cloning & Config Injection
-- Worker pulls job from queue. Clones master template to `/tmp/build-{job_id}/`
-- Replaces placeholders in: `package.json`, `src/main.js`, `assets/`, `modules/loader.js`, `renderer/splash.html`, `electron-builder.yml`
+- Build service creates workspace in configured output dir (default temp path)
+- Writes generated Electron files from templates (`config/main/preload/package`) and selected module templates
 
 ### Phase 3 — Dependency Install
-- Runs: `npm install --production` in `/tmp/build-{job_id}/`
-- Uses cached `node_modules` layer (Docker or rsync cache) — saves 2-3 minutes
-- Native modules (`keytar`, `node-addon-api`) rebuilt via `electron-rebuild`
+- Runs `npm install --no-audit --no-fund` in workspace
+- Uses configured process env (`CI`, npm/electron cache paths where available)
 
 ### Phase 4 — Compilation
 
@@ -483,7 +358,7 @@ app.on('ready', () => {
 | Windows | `electron-builder --win` | NSIS `.exe` + portable `.exe` | 2–4 min |
 | Linux | `electron-builder --linux` | `.AppImage` + `.deb` + `.rpm` | 2–3 min |
 
-> **Note:** Windows builds CAN run on Linux. macOS CANNOT cross-compile — must use `macos-latest` runner.
+> **Note:** target platform is resolved by backend configuration/host capabilities (`auto|win|linux|mac`).
 
 ### Phase 5 — Code Signing
 
@@ -493,62 +368,52 @@ app.on('ready', () => {
 | Windows | EV Code Signing Certificate (`.pfx`) or Azure Trusted Signing | Unsigned (SmartScreen warning) |
 
 ### Phase 6 — Upload & Delivery
-- Artifacts uploaded to S3/R2: `builds/{user_id}/{app_id}/{version}/{filename}`
-- Pre-signed download URLs generated (expire in 48h for free; permanent for Pro)
-- Firebase RTDB updated with `status:'done'`, download URLs, file sizes
-- Email sent via Resend: *"Your app is ready to download!"*
-- Auto-update manifest (`latest.yml`) uploaded for `electron-updater` compatibility
+- Artifacts uploaded to R2: `builds/{user_email}/{project_id}/{filename}`
+- Project updated to `READY` with `downloadUrl`
+- UI consumes SSE/status endpoints and shows download action through redirect endpoint
+- On failure, project is marked `FAILED` with error details and last output tail
 
 ---
 
 ## 07 Dashboard — Frontend Architecture
 
-The WebToDesk dashboard is a static HTML/CSS/JS SPA hosted on Netlify. Vanilla JS — no framework overhead.
+The WebToDesk dashboard is implemented as a React + TypeScript + Vite application.
 
 ### Page Structure
 
 | Page | File | Description |
 |------|------|-------------|
 | Landing Page | `index.html` | Marketing page — hero, features, pricing, testimonials |
-| Sign Up / Login | `auth.html` | Firebase Auth UI — email/password + Google Sign-In |
+| Sign Up / Login | frontend auth pages | JWT login/register flow via user-service through gateway |
 | Dashboard Home | `dashboard.html` | Lists all user's apps with status, last build date, download links |
 | App Creator | `create.html` | Multi-step form: URL → Name & Icon → Window Settings → Modules → Platform → Build |
 | App Editor | `app/{id}.html` | Edit existing app config, re-trigger builds, view build history |
-| Build Status | `build/{id}.html` | Real-time build log viewer via Firebase RTDB listener |
+| Build Status | dashboard build views | Real-time progress via SSE + build status polling |
 | Control Panel | `control.html` | Push notification sender, badge reset, analytics dashboard (Pro) |
-| Billing | `billing.html` | Paddle checkout embed, current plan, upgrade/downgrade options |
+| Billing | deferred | Payment gateway integration intentionally deferred in current phase |
 | Docs | `docs/` | Module guides, code signing walkthrough, API reference |
 
 ### Real-Time Build Status Pattern
 
-```js
-import { getDatabase, ref, onValue } from 'firebase/database'
+```javascript
+const emitter = conversionApi.subscribeToBuildProgress(projectId)
+// fallback polling
+const status = await conversionApi.getBuildStatus(projectId)
 
-const db = getDatabase()
-const buildRef = ref(db, `builds/${jobId}`)
+if (status.status === 'READY') {
+  showDownload(status.downloadUrl)
+}
 
-onValue(buildRef, (snapshot) => {
-  const data = snapshot.val()
-  if (!data) return
-
-  updateStatusBadge(data.status) // queued | building | done | failed
-
-  if (data.status === 'done') {
-    showDownloadButtons(data.urls) // { dmg, exe, appimage }
-    showBuildStats(data.size, data.built_at)
-    sendSuccessToast('Your app is ready!')
-  }
-
-  if (data.status === 'failed') {
-    showErrorMessage(data.error)
-    showRetryButton()
-  }
-})
+if (status.status === 'FAILED') {
+  showError(status.buildError)
+}
 ```
 
 ---
 
 ## 08 Complete Feature Matrix
+
+> ℹ️ **Interpretation note:** matrix entries are product-level targets; some items remain planned. Treat `skills/conversion-service.md` and current API responses as source of truth for what is currently active.
 
 | Feature | Tier | Implementation |
 |---------|------|---------------|
@@ -579,13 +444,9 @@ onValue(buildRef, (snapshot) => {
 | Custom Auth Screen | Pro | Login/PIN screen before website. Session via `keytar`. |
 | Firebase Push Notifications | Pro | FCM HTTP v1 API. Device token stored in Firebase. |
 | Deep Links | Pro | Custom protocol via `app.setAsDefaultProtocolClient()` |
-| Window Switcher Protection | Pro | Hides app from Alt+Tab/Mission Control previews |
-| Analytics Dashboard | Pro | Firebase Analytics + BigQuery export |
-| Content Security Policy | Pro | Strict CSP via `session.webRequest.onHeadersReceived` |
-| Universal Binary (macOS) | Pro | arm64+x64 fat binary. Native on Apple Silicon + Intel. |
-| White-Label / Remove Branding | Pro | Removes 'Made with WebToDesk' from About screen |
-| Custom About Page | Pro | Configurable About dialog |
-| macOS App Store Build | Pro | Sandboxed build with entitlements |
+| Analytics | Pro | Firebase Analytics + BigQuery export |
+| White Label | Pro | Removes 'Made with WebToDesk' from About screen |
+| Mac App Store Build | Pro | Sandboxed build with entitlements |
 | Linux `.deb` + `.rpm` | Pro | Additional Linux package formats. GPG signed. |
 
 ---
@@ -610,6 +471,8 @@ onValue(buildRef, (snapshot) => {
 ---
 
 ## 10 Business Model & Pricing Strategy
+
+> ⚠️ **Current implementation note:** tiered licensing and feature gating are in testing; payment/subscription gateway integration is deferred until core Free/TRIAL, STARTER, and PRO build flows are stable.
 
 ### Pricing Tiers
 
@@ -638,7 +501,7 @@ onValue(buildRef, (snapshot) => {
 | **Freemium Funnel** | Free tier gives a real, working app. User proves the concept → upgrades for signing + modules. Conversion target: 8–12% of free users. |
 | **Lifetime Plan** | One-time purchase ($199) attracts bootstrappers. Provides upfront cash flow. |
 | **Agency Tier (Future)** | Unlimited apps + white-label + reseller dashboard. Target: web agencies. Price: $49/mo or $399/yr. |
-| **Paddle MoR** | Handles VAT, GST, sales tax in 150+ countries. Zero tax compliance burden. |
+| **Billing Integration** | Deferred to later phase after tiered build/view stabilization and test coverage. |
 | **Module Upsells** | New modules released Pro-only. Creates continuous upgrade incentives. |
 | **Build Credits (Future)** | Free tier limited to N builds/month. Extra builds purchasable. |
 
@@ -648,12 +511,12 @@ onValue(buildRef, (snapshot) => {
 
 ### Phase 1 — Core MVP (Month 1–2)
 - Electron template: `main.js`, `preload.js`, `menu.js`
-- Build pipeline: Laravel API + Redis queue + GitHub Actions build agents
+- Build pipeline: conversion-service local async builds + R2 uploads + SSE status
 - Dashboard: URL input → icon upload → build → download
-- Firebase Auth: email/password sign-up
+- JWT auth via user-service through API gateway
 - macOS `.dmg` + Windows `.exe` output (unsigned)
-- Netlify hosting for dashboard static files
-- Paddle checkout integration for Free → Pro
+- React/Vite frontend deployment path
+- Payment integration deferred
 
 ### Phase 2 — Security & Auth Modules (Month 2–3)
 - Screen recording protection module (`setContentProtection`)
@@ -728,7 +591,7 @@ onValue(buildRef, (snapshot) => {
 
 ### `preload.js` — contextBridge (secure IPC)
 
-```js
+```javascript
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -749,7 +612,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
 ### `build-config.js` — Config Injection Script
 
-```js
+```javascript
 // Runs BEFORE electron-builder
 const fs = require('fs')
 const config = JSON.parse(process.env.USER_CONFIG || '{}')
@@ -776,16 +639,13 @@ fs.writeFileSync('user-config.json', JSON.stringify({
 fs.copyFileSync(config.iconPath, 'assets/icon.png')
 ```
 
-### GitHub Actions — macOS Build Agent
+### Deferred CI Example — macOS Build Agent
 
 ```yaml
-# .github/workflows/build.yml
-name: Build Electron App
+# Example only — currently deferred in favor of local build flow in conversion-service
+name: Build Electron App (Deferred)
 on:
   workflow_dispatch:
-    inputs:
-      build_id:    { required: true }
-      user_config: { required: true }
 
 jobs:
   build-mac:
@@ -794,22 +654,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
-
-      - name: Inject config and build
-        env:
-          USER_CONFIG:                 ${{ inputs.user_config }}
-          APPLE_ID:                    ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID:               ${{ secrets.APPLE_TEAM_ID }}
-          CSC_LINK:                    ${{ secrets.MAC_CERT_P12_BASE64 }}
-          CSC_KEY_PASSWORD:            ${{ secrets.MAC_CERT_PASSWORD }}
-        run: |
-          node build-config.js
-          npm install
-          npx electron-builder --mac --publish never
-
-      - name: Upload to S3
-        run: aws s3 cp dist/*.dmg s3://webtodesk-builds/${{ inputs.build_id }}/
+      - run: npm ci && npx electron-builder --mac --publish never
 ```
 
 ---

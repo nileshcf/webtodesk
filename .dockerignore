@@ -2,10 +2,17 @@
 .github
 .idea
 
+# Maven build output — never needed in Docker build context (Maven builds from source inside container)
+**/target/
+
 **/node_modules
 **/dist
 
 frontend/.vite
+
+# Documentation and agent skill files — not needed in the image
+docs/
+skills/
 
 *.log
 *.tmp

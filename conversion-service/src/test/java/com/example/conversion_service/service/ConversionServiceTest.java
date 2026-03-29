@@ -146,7 +146,7 @@ class ConversionServiceTest {
         when(repository.save(any(ConversionProject.class))).thenReturn(sampleProject);
 
         var request = new UpdateConversionRequest(null, "https://new-url.com", "New Title", null, "2.0.0", null, null);
-        ConversionResponse response = conversionService.update("proj-123", request);
+        conversionService.update("proj-123", request);
 
         verify(repository).save(argThat(project ->
                 "https://new-url.com".equals(project.getWebsiteUrl()) &&
@@ -240,7 +240,8 @@ class ConversionServiceTest {
         String mainJs = response.files().get("main.js");
         assertThat(mainJs).contains("nodeIntegration: false");
         assertThat(mainJs).contains("contextIsolation: true");
-        assertThat(mainJs).contains("setContentProtection(true)");
+        assertThat(mainJs).contains("show: false");
+        assertThat(mainJs).contains("ready-to-show");
     }
 
     @Test

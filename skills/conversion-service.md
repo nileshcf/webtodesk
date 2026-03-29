@@ -7,13 +7,14 @@ description: >
   Part of a multi-module Maven project with api-gateway, user-service, discovery-service, and
   a React/Vite frontend. Use this skill for: upgrading the conversion-service architecture,
   adding Electron modules, improving the template engine, wiring build pipelines, R2 storage,
-  GitHub Actions integration, or any task touching conversion-service code.
+  and production hardening tasks touching conversion-service code.
   The agent follows a 4-week phased overhaul plan (§8) — each week is self-contained.
   **Week 1 (Foundation + R2 + Local Builds) is COMPLETE as of 2026-03-27.**
   **Week 2 (Licensing + Build Queue + Frontend Components) is COMPLETE. All 57 tests passed.**
   **Week 3 (Template Engine + Module System + Build Metrics) is COMPLETE as of 2026-03-28. All 83 tests pass.**
   **Week 4 (Toggleable Modules + Dev Build + Dashboard) is IN PROGRESS as of 2026-03-29. All 83 tests still pass.**
-  Current week: Week 4. Remaining: VersionUpgradeService, GitHub Actions CI, OpenAPI docs.
+  Current week: Week 4. Remaining: VersionUpgradeService, OpenAPI docs, production observability.
+  Payment/subscription integration is explicitly deferred until core build/test flows are stable.
   Activates for: webtodesk, conversion service, electron app builder, url to desktop, desktop
   wrapper, electron template, build pipeline, conversion project, R2, cloudflare, artifact storage.
 stack: Java 17, Spring Boot 3.3.6, Spring Cloud 2023.0.4, MongoDB, Eureka, Lombok,
@@ -46,6 +47,68 @@ On every invocation the agent MUST:
 
 > **Cardinal Rule:** Every commit must leave the service in a deployable state. If a feature
 > spans multiple sessions, use feature flags or additive-only changes.
+
+### 0.1 Root Automation Script Protocol (Windows)
+
+When an agent needs to orchestrate local runtime or Docker flows from repo root, use these scripts:
+
+- `start-all.ps1` — local microservices + frontend startup
+- `docker-rebuild.ps1` — deterministic image rebuild
+- `docker-start.ps1` — deterministic container start
+- `git-operations.ps1` — git operations in interactive or command mode
+
+**Agent mode requirements:**
+
+1. Use `-NonInteractive` to avoid prompts.
+2. Use `-OutputJson` for machine-readable output.
+3. Use explicit action flags (`-Action status`, `-Action switch`, etc.) for git automation.
+
+```powershell
+.\start-all.ps1 -NonInteractive -NoBrowserPrompt -OutputJson
+.\docker-rebuild.ps1 -NoCache -RemoveOldImages -PruneDangling -NonInteractive -OutputJson
+.\docker-start.ps1 -StopExisting -KillPortProcess -NonInteractive -OutputJson
+.\git-operations.ps1 -Action status -OutputJson
+```
+
+### 0.2 Java 17 + Dependency Contract (No Guessing)
+
+Before starting work, agents must verify runtime and package manager versions:
+
+```powershell
+java -version
+$env:JAVA_HOME
+.\mvnw -v
+node -v
+npm -v
+```
+
+Required contract:
+
+1. Java must be **JDK 17**.
+2. Local workspace baseline `JAVA_HOME` is `C:\Program Files\Java\jdk-17`.
+3. Use Maven wrapper (`mvnw`/`mvnw.cmd`), not global Maven assumptions.
+4. Install frontend dependencies with `npm --prefix .\frontend ci`.
+5. If Java path is ambiguous, pass `-JavaHome` to `start-all.ps1` rather than changing machine-wide configuration.
+
+Deterministic local boot path:
+
+```powershell
+npm --prefix .\frontend ci
+.\mvnw -q -DskipTests compile
+.\start-all.ps1 -NonInteractive -NoBrowserPrompt -OutputJson
+```
+
+### 0.3 Alignment Contract with `docs/conversion_service-refrencer.md`
+
+Use `docs/conversion_service-refrencer.md` as **vision/reference context** only. For implementation and testing decisions, this file and the live codebase are authoritative.
+
+Current authoritative implementation:
+
+1. Stack is Spring Boot microservices + React/Vite (not Laravel/Firebase runtime).
+2. Build path is local `ProcessBuilder` orchestration + R2 uploads (not webhook-driven GitHub Actions callback flow).
+3. Tier model in active use: `TRIAL` (Free view), `STARTER`, `PRO`, `LIFETIME`.
+4. During testing, users must be able to select and build across Free/Starter/Pro views; do not block this behind payment wiring.
+5. Payment/subscription work remains deferred until core tier views, build flow, and module gating are validated end-to-end.
 
 ---
 
@@ -360,11 +423,27 @@ DELETE /conversions/{id}                      Delete project
 # Generation
 POST   /conversions/{id}/generate             Generate Electron files (synchronous)
 
-# Build Pipeline (Week 1 — R2 + GitHub Actions)
-POST   /conversions/{id}/build                Trigger GitHub Actions build → 202 BUILDING
+# Build Pipeline (legacy-compatible conversion endpoints)
+POST   /conversions/{id}/build                Trigger local async build → 202 BUILDING
 GET    /conversions/{id}/build/status         Poll build status → BuildStatusResponse
+GET    /conversions/{id}/build/stream         SSE progress stream
 GET    /conversions/{id}/build/download       302 redirect to R2 public URL
-POST   /conversions/{id}/build/callback       Webhook from GitHub Actions
+
+# Build Pipeline (expanded endpoints in BuildController)
+POST   /build/trigger                         Trigger build by projectId
+GET    /build/status/{projectId}              Poll build status
+GET    /build/progress/{projectId}            SSE progress stream
+GET    /build/queue/status                    Queue depth and wait info
+POST   /build/retry/{projectId}               Retry build
+POST   /build/cancel/{projectId}              Cancel request (stub)
+GET    /build/file-types/{targetOS}           Available installer file types
+POST   /build/validate-config                 Validate build config (stub)
+GET    /build/metrics                         User-level build metrics
+GET    /build/metrics/{projectId}             Project-level build metrics
+GET    /build/history/{projectId}             Build history
+GET    /build/modules                         Tier-aware module availability
+GET    /build/download/{projectId}            302 redirect to R2 public URL
+GET    /build/logs/{projectId}                Last known progress/error lines
 
 # Health
 GET    /conversions/health                    Health check
@@ -384,11 +463,10 @@ GET    /conversions/health                    Health check
 }
 ```
 
-**BuildCallbackRequest** (from GitHub Actions):
+**Build trigger request** (`POST /build/trigger`):
 ```json
 {
-  "projectId": "string", "runId": 12345,
-  "success": true, "artifactUrl": "string|null", "errorMessage": "string|null"
+  "projectId": "string"
 }
 ```
 
@@ -594,7 +672,7 @@ R2 cloud storage, local build orchestration using Node.js & Electron Builder, SS
 - [ ] TEST · Load testing for build queue
 - [ ] TEST · Failover and recovery tests
 
-## TASK: Advanced Licensing Features
+## TASK: Advanced Licensing Features (Non-Billing First)
 ## WEEK: 4
 ## SCOPE: service, controller, frontend
 
@@ -602,11 +680,20 @@ R2 cloud storage, local build orchestration using Node.js & Electron Builder, SS
 - [ ] P0 · Implement license expiry enforcement with blocking screen
 - [ ] P0 · Add automatic version upgrade system
 - [ ] P0 · Create license analytics and reporting dashboard
-- [ ] P0 · Implement subscription billing integration (Stripe/Razorpay)
+- [ ] P0 · Ensure Free/Starter/Pro views can all trigger and monitor builds in testing
+- [ ] P0 · Validate tier-based module gating for Free/Starter/Pro in UI and backend responses
 - [ ] P1 · Add license transfer and team management
 - [ ] P1 · Create admin panel for license management
 - [ ] TEST · License expiry enforcement tests
 - [ ] TEST · Version upgrade migration tests
+
+## TASK: Deferred — Payment/Subscription Integration
+## WEEK: Deferred
+## SCOPE: billing, webhook, checkout
+
+### TODO
+- [ ] P1 · Implement subscription billing integration (Stripe/Razorpay/Paddle)
+- [ ] P1 · Add webhook reconciliation and entitlement sync
 - [ ] TEST · Billing integration tests
 
 ## TASK: Monitoring & Observability

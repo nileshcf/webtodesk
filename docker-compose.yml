@@ -11,3 +11,20 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+
+    # Electron/Chromium uses shared memory for IPC.
+    # Default 64 MB causes SIGBUS crashes during electron-builder packaging.
+    shm_size: 512m
+
+    # electron-builder opens hundreds of file handles while packaging.
+    # Default nofile=1024 causes EMFILE: too many open files on larger apps.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+    # Mount the build workspace on tmpfs (RAM) instead of Docker's overlay FS.
+    # npm install + electron-builder I/O is 3-5x faster on tmpfs.
+    # Remove or reduce size if the host has < 2 GB free RAM.
+    tmpfs:
+      - /tmp/webtodesk-builds:mode=1777,size=1500m

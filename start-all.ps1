@@ -1,88 +1,185 @@
-# ------------------------------------------------------
-# WebToDesk - Start All Services (Local Development)
-# Run: .\start-all.ps1
-# ------------------------------------------------------
+[CmdletBinding()]
+param(
+    [string]$JavaHome = "C:\Program Files\Java\jdk-17",
+    [switch]$ForceKillPorts,
+    [switch]$NonInteractive,
+    [switch]$NoBrowserPrompt,
+    [switch]$OutputJson,
+    [switch]$HiddenWindows,
+    [int]$ReadyTimeoutSec = 60
+)
 
-Write-Host ""
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  WebToDesk - Starting All Services"     -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host ""
+function Write-Info {
+    param([string]$Message)
+    if (-not $OutputJson) {
+        Write-Host "[$((Get-Date).ToString('HH:mm:ss'))] $Message" -ForegroundColor Yellow
+    }
+}
 
-$root = $PSScriptRoot
-# CHANGED: The startup was failing because the system JAVA_HOME pointed to JDK 11 (which had an invalid path).
-# Added the below line to explicitly set JAVA_HOME to JDK 17 for the microservices.
-$env:JAVA_HOME = "C:\Program Files\Java\jdk-17"
+function Write-Ok {
+    param([string]$Message)
+    if (-not $OutputJson) {
+        Write-Host "[OK] $Message" -ForegroundColor Green
+    }
+}
 
-# 1. Discovery Service (Eureka - must start first)
-Write-Host "[1/5] Starting Discovery Service (port 8761)..." -ForegroundColor Yellow
-# CHANGED: The original script failed because it tried to run 'mvnw.cmd' inside this subdirectory, but the wrapper is only in the root.
-# Changed 'mvnw.cmd' to '..\mvnw.cmd' to correctly point to the root directory wrapper.
-Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\discovery-service && ..\mvnw.cmd spring-boot:run" -WindowStyle Normal
+function Write-Fail {
+    param([string]$Message)
+    if (-not $OutputJson) {
+        Write-Host "[ERROR] $Message" -ForegroundColor Red
+    }
+}
 
-# Wait for Eureka to be reachable before starting other services.
-# This avoids races where dependent services try to register before the Eureka server is ready.
-$eurekaHost = "localhost"
-$eurekaPort = 8761
-$eurekaUrl = "http://$eurekaHost`:$eurekaPort/eureka/apps"
-$deadline = (Get-Date).AddSeconds(60)
-
-while ((Get-Date) -lt $deadline) {
-  $portReady = $false
-  try {
-    $portReady = Test-NetConnection -ComputerName $eurekaHost -Port $eurekaPort -InformationLevel Quiet
-  } catch {
-    $portReady = $false
-  }
-
-  if ($portReady) {
-    $httpReady = $false
+function Test-Port {
+    param([int]$Port)
     try {
-      # /eureka/apps is a lightweight endpoint that should respond once the server is up.
-      $null = Invoke-WebRequest -Uri $eurekaUrl -Method GET -TimeoutSec 2 -UseBasicParsing
-      $httpReady = $true
+        $connection = New-Object System.Net.Sockets.TcpClient
+        $connection.Connect("localhost", $Port)
+        $connection.Close()
+        return $true
     } catch {
-      $httpReady = $false
+        return $false
+    }
+}
+
+function Test-Yes {
+    param([string]$Prompt)
+
+    if ($ForceKillPorts -or $NonInteractive) {
+        return $true
     }
 
-    if ($httpReady) { break }
-  }
-
-  Start-Sleep -Seconds 2
+    $answer = Read-Host "$Prompt (y/N)"
+    return ($answer -eq "y" -or $answer -eq "Y")
 }
 
-if (-not (Test-NetConnection -ComputerName $eurekaHost -Port $eurekaPort -InformationLevel Quiet)) {
-  Write-Host "Warning: Eureka did not become ready within timeout. Continuing anyway..." -ForegroundColor Red
+function Wait-PortReady {
+    param([int]$Port, [int]$TimeoutSec)
+
+    $start = Get-Date
+    while (((Get-Date) - $start).TotalSeconds -lt $TimeoutSec) {
+        if (Test-Port -Port $Port) {
+            return $true
+        }
+        Start-Sleep -Seconds 2
+    }
+    return $false
 }
 
-# 2. User Service
-Write-Host "[2/5] Starting User Service (port 8081)..." -ForegroundColor Yellow
-# CHANGED: Updated 'mvnw.cmd' to '..\mvnw.cmd' because running it linearly without the parent path failed.
-Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\user-service && ..\mvnw.cmd spring-boot:run" -WindowStyle Normal
-Start-Sleep -Seconds 5
+$root = $PSScriptRoot
+$env:JAVA_HOME = $JavaHome
+$windowStyle = if ($HiddenWindows) { "Hidden" } else { "Normal" }
 
-# 3. Conversion Service
-Write-Host "[3/5] Starting Conversion Service (port 8082)..." -ForegroundColor Yellow
-# CHANGED: Updated 'mvnw.cmd' to '..\mvnw.cmd'
-Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\conversion-service && ..\mvnw.cmd spring-boot:run" -WindowStyle Normal
-Start-Sleep -Seconds 5
+# Load .env into the current process so Spring Boot services get MONGODB_URI,
+# R2_* credentials, DEVELOPMENT_BUILD, and any other secrets at runtime.
+$envFile = Join-Path $root ".env"
+if (Test-Path $envFile) {
+    Get-Content $envFile |
+        Where-Object { $_ -notmatch '^\s*#' -and $_ -notmatch '^\s*$' -and $_ -match '=' } |
+        ForEach-Object {
+            $key, $val = $_ -split '=', 2
+            [System.Environment]::SetEnvironmentVariable($key.Trim(), $val.Trim(), 'Process')
+        }
+    Write-Info "Loaded environment from .env"
+} else {
+    Write-Info "No .env file found at $envFile — services may fail if cloud credentials are required"
+}
 
-# 4. API Gateway
-Write-Host "[4/5] Starting API Gateway (port 8080)..." -ForegroundColor Yellow
-# CHANGED: Updated 'mvnw.cmd' to '..\mvnw.cmd'
-Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\api-gateway && ..\mvnw.cmd spring-boot:run" -WindowStyle Normal
-Start-Sleep -Seconds 5
+$result = [ordered]@{
+    script = "start-all.ps1"
+    root = $root
+    javaHome = $env:JAVA_HOME
+    success = $false
+    services = @()
+}
 
-# 5. React Frontend (Vite)
-Write-Host "[5/5] Starting React Frontend (port 5173)..." -ForegroundColor Yellow
-Start-Process -FilePath "cmd" -ArgumentList "/c cd /d $root\frontend && npm run dev" -WindowStyle Normal
+if (-not (Test-Path "$env:JAVA_HOME\bin\java.exe")) {
+    $result.error = "Java not found at $env:JAVA_HOME"
+    Write-Fail $result.error
+    if ($OutputJson) {
+        $result | ConvertTo-Json -Depth 6
+    }
+    exit 1
+}
 
-Write-Host ""
-Write-Host "========================================" -ForegroundColor Green
-Write-Host "  All services starting!"               -ForegroundColor Green
-Write-Host "  Eureka:    http://localhost:8761"      -ForegroundColor White
-Write-Host "  Gateway:   http://localhost:8080"      -ForegroundColor White
-Write-Host "  User:      http://localhost:8081"      -ForegroundColor White
-Write-Host "  Converter: http://localhost:8082"      -ForegroundColor White
-Write-Host "  Frontend:  http://localhost:5173"      -ForegroundColor White
-Write-Host "========================================" -ForegroundColor Green
+$services = @(
+    [ordered]@{ Key = "Discovery"; Name = "Eureka Discovery Service"; Port = 8761; Path = "discovery-service"; Type = "maven" },
+    [ordered]@{ Key = "User"; Name = "User Service"; Port = 8081; Path = "user-service"; Type = "maven" },
+    [ordered]@{ Key = "Conversion"; Name = "Conversion Service"; Port = 8082; Path = "conversion-service"; Type = "maven" },
+    [ordered]@{ Key = "Gateway"; Name = "API Gateway"; Port = 8080; Path = "api-gateway"; Type = "maven" },
+    [ordered]@{ Key = "Frontend"; Name = "React Frontend"; Port = 5173; Path = "frontend"; Type = "npm" }
+)
+
+foreach ($svc in $services) {
+    Write-Info "Starting $($svc.Name) on port $($svc.Port)"
+
+    if (Test-Port -Port $svc.Port) {
+        $portProcess = Get-NetTCPConnection -LocalPort $svc.Port -ErrorAction SilentlyContinue |
+            Where-Object { $_.State -eq "Listen" } |
+            Select-Object -First 1
+
+        if ($portProcess) {
+            if (Test-Yes -Prompt "Port $($svc.Port) is in use. Kill PID $($portProcess.OwningProcess)?") {
+                Stop-Process -Id $portProcess.OwningProcess -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 2
+            }
+        }
+    }
+
+    if ($svc.Type -eq "npm") {
+        $command = "/c cd /d $root\$($svc.Path) && npm run dev"
+    } else {
+        # Pass MONGODB_URI (and any other -D overrides) so Spring Boot picks up cloud credentials
+        $mongoArg = if ($env:MONGODB_URI) { " `"-DMONGODB_URI=$env:MONGODB_URI`"" } else { "" }
+        $command = "/c cd /d $root\$($svc.Path) && ..\mvnw.cmd spring-boot:run$mongoArg"
+    }
+
+    $process = Start-Process -FilePath "cmd" -ArgumentList $command -WindowStyle $windowStyle -PassThru
+    $ready = Wait-PortReady -Port $svc.Port -TimeoutSec $ReadyTimeoutSec
+
+    $serviceResult = [ordered]@{
+        key = $svc.Key
+        name = $svc.Name
+        port = $svc.Port
+        pid = $process.Id
+        ready = $ready
+        status = if ($ready) { "Running" } else { "Starting" }
+        url = "http://localhost:$($svc.Port)"
+    }
+
+    $result.services += $serviceResult
+
+    if ($ready) {
+        Write-Ok "$($svc.Name) is reachable on port $($svc.Port)"
+    } else {
+        Write-Info "$($svc.Name) is still starting"
+    }
+}
+
+$runningCount = ($result.services | Where-Object { $_.ready }).Count
+$result.runningCount = $runningCount
+$result.totalCount = $result.services.Count
+$result.success = ($runningCount -ge 4)
+
+if ($OutputJson) {
+    $result | ConvertTo-Json -Depth 8
+} else {
+    Write-Host ""
+    Write-Host "Services Running: $runningCount/$($result.services.Count)" -ForegroundColor Cyan
+    foreach ($svc in $result.services) {
+        Write-Host "- $($svc.name): $($svc.status) | PID=$($svc.pid) | $($svc.url)" -ForegroundColor White
+    }
+
+    if (-not $NoBrowserPrompt -and -not $NonInteractive) {
+        $openBrowser = Read-Host "Open frontend in browser? (y/N)"
+        if ($openBrowser -eq "y" -or $openBrowser -eq "Y") {
+            Start-Process "http://localhost:5173"
+        }
+    }
+}
+
+if ($result.success) {
+    exit 0
+}
+
+exit 1

@@ -1,9 +1,18 @@
 // Module: deep-link — Tier: PRO
 // Registers a custom URL protocol so the app can be opened via myapp://... links.
+const { app } = require('electron');
+
+// Must run before app.whenReady() — called at require() time from the top of main.js
+const _deepLinkLockAcquired = app.requestSingleInstanceLock();
+if (!_deepLinkLockAcquired) {
+  app.quit();
+}
+
 function setup(mainWindow, config) {
   if (!config.modules?.includes('deep-link')) return;
+  if (!_deepLinkLockAcquired) return;
 
-  const { app, ipcMain } = require('electron');
+  const { ipcMain } = require('electron');
   const protocol = config.projectName?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'webtodesk';
 
   if (process.defaultApp) {

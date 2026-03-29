@@ -31,6 +31,7 @@ public class User {
     private String password;
 
     @Column(nullable = false)
+    @Builder.Default
     private boolean emailVerified = false;
 
     @ElementCollection(fetch = FetchType.EAGER)

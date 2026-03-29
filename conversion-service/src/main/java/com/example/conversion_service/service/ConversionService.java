@@ -3,44 +3,35 @@ package com.example.conversion_service.service;
 
 
 import com.example.conversion_service.dto.*;
-
 import com.example.conversion_service.entity.ConversionProject;
-
 import com.example.conversion_service.entity.ConversionProject.ConversionStatus;
-
+import com.example.conversion_service.entity.ConversionProject.LicenseTier;
 import com.example.conversion_service.exception.ProjectNotFoundException;
-
 import com.example.conversion_service.repository.ConversionRepository;
-
 import lombok.RequiredArgsConstructor;
-
 import lombok.extern.slf4j.Slf4j;
-
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-
-
+import java.util.HashMap;
 import java.util.LinkedHashMap;
-
 import java.util.List;
-
 import java.util.Map;
-
 import java.util.stream.Collectors;
 
 
 
 @Slf4j
-
 @Service
-
 @RequiredArgsConstructor
-
 public class ConversionService {
 
-
-
     private final ConversionRepository repository;
+    private final TemplateEngine templateEngine;
+    private final ModuleRegistry moduleRegistry;
+
+    @Value("${webtodesk.build.linux-target:AppImage}")
+    private String linuxTarget;
 
 
 
@@ -158,42 +149,87 @@ public class ConversionService {
 
         ConversionProject project = findOrThrow(id);
 
-
-
         project.setStatus(ConversionStatus.READY);
-
         repository.save(project);
 
-
-
-        Map<String, String> files = new LinkedHashMap<>();
-
-        files.put("config.js", generateConfigJs(project));
-
-        files.put("main.js", generateMainJs());
-
-        files.put("preload.js", generatePreloadJs());
-
-        files.put("package.json", generatePackageJson(project));
-
-
+        Map<String, String> files = buildElectronFiles(project);
 
         log.info("Generated Electron project for: {}", project.getProjectName());
 
-
-
         return new ElectronConfigResponse(
-
                 project.getProjectName(),
-
                 project.getAppTitle(),
-
                 project.getWebsiteUrl(),
-
                 files
-
         );
+    }
 
+    private Map<String, String> buildElectronFiles(ConversionProject project) {
+        LicenseTier tier = project.getTier() != null ? project.getTier() : LicenseTier.TRIAL;
+        List<String> resolved = moduleRegistry.resolveEnabledModules(project.getEnabledModules(), tier);
+
+        StringBuilder requires = new StringBuilder();
+        StringBuilder setups   = new StringBuilder();
+        for (String key : resolved) {
+            String varName = key.replace('-', '_');
+            requires.append("const ").append(varName)
+                    .append(" = require('./modules/").append(key).append("');\n");
+            setups.append("  ").append(varName).append(".setup(mainWindow, config);\n");
+        }
+
+        String modulesJson = resolved.isEmpty() ? "[]"
+                : "[\"" + String.join("\",\"", resolved) + "\"]";
+
+        String targetPlatform = project.getTargetPlatform();
+        boolean isWin  = targetPlatform != null && (targetPlatform.startsWith("win"));
+        boolean isMac  = targetPlatform != null && (targetPlatform.startsWith("mac") || targetPlatform.startsWith("darwin"));
+        boolean isLinux = !isWin && !isMac;
+
+        Map<String, Object> ctx = new HashMap<>();
+        ctx.put("projectName",    project.getProjectName());
+        ctx.put("npmPackageName", sanitizeNpmPackageName(project.getProjectName()));
+        ctx.put("appId",          buildAppId(project.getProjectName()));
+        ctx.put("currentVersion", project.getCurrentVersion() != null ? project.getCurrentVersion() : "1.0.0");
+        ctx.put("appTitle",       project.getAppTitle());
+        ctx.put("websiteUrl",     project.getWebsiteUrl());
+        ctx.put("iconFile",       project.getIconFile() != null ? project.getIconFile() : "icon.ico");
+        ctx.put("modulesJson",    modulesJson);
+        ctx.put("hasModules",      !resolved.isEmpty());
+        ctx.put("hasScreenProtect", resolved.contains("screen-protect"));
+        ctx.put("moduleRequires",  requires.toString());
+        ctx.put("moduleSetups",    setups.toString());
+        ctx.put("isWin",   isWin);
+        ctx.put("isLinux", isLinux);
+        ctx.put("isMac",   isMac);
+        ctx.put("linuxTarget", linuxTarget);
+
+        Map<String, String> files = new LinkedHashMap<>();
+        files.put("config.js",    templateEngine.render("config.mustache",  ctx));
+        files.put("main.js",      templateEngine.render("main.mustache",    ctx));
+        files.put("preload.js",   templateEngine.render("preload.mustache", ctx));
+        files.put("package.json", templateEngine.render("package.mustache", ctx));
+
+        for (String key : resolved) {
+            moduleRegistry.get(key).ifPresent(def ->
+                    files.put("modules/" + key + ".js",
+                            templateEngine.render(def.templateFile(), Map.of())));
+        }
+        return files;
+    }
+
+    private static String sanitizeNpmPackageName(String name) {
+        String base = name == null ? "" : name.trim().toLowerCase();
+        base = base.replaceAll("\\s+", "-").replaceAll("[^a-z0-9._-]", "-")
+                   .replaceAll("-{2,}", "-").replaceAll("^[._-]+", "").replaceAll("[._-]+$", "");
+        if (base.isBlank()) return "webtodesk-app";
+        return base.length() > 214 ? base.substring(0, 214) : base;
+    }
+
+    private static String buildAppId(String name) {
+        String base = name == null ? "" : name.trim().toLowerCase();
+        base = base.replaceAll("[^a-z0-9]+", ".").replaceAll("\\.{2,}", ".")
+                   .replaceAll("^\\.", "").replaceAll("\\.$", "");
+        return base.isBlank() ? "com.webtodesk.app" : "com.webtodesk." + base;
     }
 
 
@@ -214,459 +250,16 @@ public class ConversionService {
 
     // ─── Private Helpers ──────────────────────────────────────
 
-
-
     private ConversionProject findOrThrow(String id) {
-
         return repository.findById(id)
-
                 .orElseThrow(() -> new ProjectNotFoundException(id));
-
     }
-
-
 
     private String sanitizeProjectName(String name) {
-
         return name.toLowerCase().replaceAll("[^a-z0-9\\-]", "-");
-
     }
 
 
-
-    private String generateConfigJs(ConversionProject project) {
-
-        return """
-
-                // Generated by WebToDesk Conversion Service
-
-                module.exports = {
-
-                  projectName: '%s',
-
-                  currentVersion: '%s',
-
-                  appTitle: '%s',
-
-                  websiteUrl: '%s',
-
-                  iconFile: '%s'
-
-                };
-
-                """.formatted(
-
-                project.getProjectName(),
-
-                project.getCurrentVersion(),
-
-                project.getAppTitle(),
-
-                project.getWebsiteUrl(),
-
-                project.getIconFile()
-
-        );
-
-    }
-
-
-
-    private String generateMainJs() {
-
-        return """
-
-                const { app, BrowserWindow, globalShortcut, ipcMain, shell } = require('electron');
-
-                const path = require('path');
-
-                const { appTitle, websiteUrl, iconFile } = require('./config');
-
-
-
-                async function createWindow() {
-
-                  const getIconPath = () =>
-
-                    path.join(__dirname, 'build',
-
-                      process.platform === 'darwin' ? 'icon.icns' :
-
-                      process.platform === 'win32'  ? iconFile : 'icon.png');
-
-
-
-                  const mainWindow = new BrowserWindow({
-
-                    width: 1200,
-
-                    height: 800,
-
-                    title: appTitle,
-
-                    icon: getIconPath(),
-
-                    webPreferences: {
-
-                      nodeIntegration: false,
-
-                      contextIsolation: true,
-
-                      enableRemoteModule: false,
-
-                      preload: path.join(__dirname, 'preload.js')
-
-                    }
-
-                  });
-
-
-
-                  mainWindow.loadURL(websiteUrl).catch(err => {
-
-                    console.error('Failed to load URL:', err.message);
-
-                  });
-
-
-
-                  mainWindow.webContents.on('page-title-updated', event => {
-
-                    event.preventDefault();
-
-                    mainWindow.setTitle(appTitle);
-
-                  });
-
-
-
-                  if (process.platform === 'darwin' || process.platform === 'win32') {
-
-                    mainWindow.setContentProtection(true);
-
-                  }
-
-
-
-                  mainWindow.webContents.on('devtools-opened', () => {
-
-                    mainWindow.webContents.closeDevTools();
-
-                  });
-
-
-
-                  mainWindow.setMenuBarVisibility(false);
-
-
-
-                  const registerShortcuts = () => {
-
-                    const shortcuts = [
-
-                      'PrintScreen', 'Alt+PrintScreen', 'Super+Shift+S',
-
-                      'Super+PrintScreen', 'Command+Shift+3',
-
-                      'Command+Shift+4', 'Command+Shift+5'
-
-                    ];
-
-                    shortcuts.forEach(shortcut => {
-
-                      globalShortcut.register(shortcut, () => {
-
-                        if (mainWindow?.isDestroyed?.()) return;
-
-                        mainWindow.webContents.send('trigger-protection');
-
-                      });
-
-                    });
-
-                  };
-
-
-
-                  registerShortcuts();
-
-                  mainWindow.on('focus', registerShortcuts);
-
-                  mainWindow.on('blur', () => globalShortcut.unregisterAll());
-
-                }
-
-
-
-                app.whenReady().then(createWindow);
-
-
-
-                app.on('will-quit', () => globalShortcut.unregisterAll());
-
-
-
-                app.on('window-all-closed', () => {
-
-                  if (process.platform !== 'darwin') app.quit();
-
-                });
-
-
-
-                app.on('activate', () => {
-
-                  if (!BrowserWindow.getAllWindows().length) createWindow();
-
-                });
-
-
-
-                ipcMain.on('open-external', (event, url) => shell.openExternal(url));
-
-                """;
-
-    }
-
-
-
-    private String generatePreloadJs() {
-
-        return """
-
-                const { contextBridge, ipcRenderer } = require('electron');
-
-
-
-                contextBridge.exposeInMainWorld('electronAPI', {
-
-                  openExternal: url => ipcRenderer.send('open-external', url)
-
-                });
-
-
-
-                (function initializeProtectionUI() {
-
-                  const blackout = document.createElement('div');
-
-                  blackout.style.cssText = `
-
-                    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-
-                    background: linear-gradient(to bottom, #000000, #1a1a1a);
-
-                    z-index: 10001; display: none; pointer-events: none;
-
-                    opacity: 0; transition: opacity 0.3s ease-in-out;
-
-                  `;
-
-                  document.body.appendChild(blackout);
-
-
-
-                  const timerDisplay = document.createElement('div');
-
-                  timerDisplay.style.cssText = `
-
-                    position: absolute; top: 60%; left: 50%;
-
-                    transform: translate(-50%, -50%); color: #ffffff;
-
-                    font-size: 24px; z-index: 10003; font-family: Arial, sans-serif;
-
-                    opacity: 0; transition: opacity 0.3s ease-in-out;
-
-                  `;
-
-                  blackout.appendChild(timerDisplay);
-
-
-
-                  const snackbar = document.createElement('div');
-
-                  snackbar.textContent = 'Screenshots and recordings are not allowed.';
-
-                  snackbar.style.cssText = `
-
-                    position: fixed; top: 50%; left: 50%;
-
-                    transform: translate(-50%, -50%); background-color: #d32f2f;
-
-                    color: white; padding: 20px 40px; border-radius: 12px;
-
-                    z-index: 10002; opacity: 0; transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
-
-                    display: none; font-size: 20px; text-align: center;
-
-                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5); font-family: Arial, sans-serif;
-
-                  `;
-
-                  document.body.appendChild(snackbar);
-
-
-
-                  let isProtectionActive = false;
-
-                  let protectionTimer = null;
-
-
-
-                  const flashBorder = () => {
-
-                    document.body.style.border = '8px solid red';
-
-                    let flashCount = 0;
-
-                    const flashInterval = setInterval(() => {
-
-                      document.body.style.borderColor = flashCount % 2 ? 'transparent' : 'red';
-
-                      if (++flashCount >= 8) {
-
-                        clearInterval(flashInterval);
-
-                        document.body.style.border = 'none';
-
-                      }
-
-                    }, 150);
-
-                  };
-
-
-
-                  const triggerProtection = () => {
-
-                    if (isProtectionActive) return;
-
-                    isProtectionActive = true;
-
-                    blackout.style.display = 'block';
-
-                    blackout.style.opacity = '1';
-
-                    snackbar.style.display = 'block';
-
-                    snackbar.style.opacity = '1';
-
-                    snackbar.style.transform = 'translate(-50%, -50%) scale(1.05)';
-
-                    setTimeout(() => { snackbar.style.transform = 'translate(-50%, -50%) scale(1)'; }, 300);
-
-                    timerDisplay.style.opacity = '1';
-
-                    flashBorder();
-
-                    let timeLeft = 10;
-
-                    timerDisplay.textContent = `Resuming in ${timeLeft}...`;
-
-                    protectionTimer = setInterval(() => {
-
-                      timerDisplay.textContent = `Resuming in ${--timeLeft}...`;
-
-                      if (timeLeft <= 0) {
-
-                        clearInterval(protectionTimer);
-
-                        snackbar.style.opacity = blackout.style.opacity = timerDisplay.style.opacity = '0';
-
-                        setTimeout(() => {
-
-                          snackbar.style.display = blackout.style.display = 'none';
-
-                          isProtectionActive = false;
-
-                        }, 300);
-
-                      }
-
-                    }, 1000);
-
-                  };
-
-
-
-                  ipcRenderer.on('trigger-protection', triggerProtection);
-
-                })();
-
-                """;
-
-    }
-
-
-
-    private String generatePackageJson(ConversionProject project) {
-
-        return """
-
-                {
-
-                  "name": "%s",
-
-                  "version": "%s",
-
-                  "description": "Desktop app for %s",
-
-                  "main": "main.js",
-
-                  "scripts": {
-
-                    "start": "electron .",
-
-                    "dist": "electron-builder --publish=never"
-
-                  },
-
-                  "devDependencies": {
-
-                    "electron": "^38.2.2",
-
-                    "electron-builder": "^26.0.12"
-
-                  },
-
-                  "build": {
-
-                    "appId": "com.%s.app",
-
-                    "productName": "%s",
-
-                    "directories": { "output": "dist" },
-
-                    "files": ["main.js", "preload.js", "config.js", "build/**/*"],
-
-                    "win": { "target": "nsis", "icon": "build/%s" },
-
-                    "mac": { "category": "public.app-category.utilities", "icon": "build/icon.icns" },
-
-                    "linux": { "target": "AppImage", "icon": "build/icon.png" }
-
-                  }
-
-                }
-
-                """.formatted(
-
-                project.getProjectName(),
-
-                project.getCurrentVersion(),
-
-                project.getAppTitle(),
-
-                project.getProjectName(),
-
-                project.getAppTitle(),
-
-                project.getIconFile()
-
-        );
-
-    }
 
 }
 

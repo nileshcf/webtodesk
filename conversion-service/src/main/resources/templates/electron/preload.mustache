@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: url => ipcRenderer.send('open-external', url)
 });
 
+{{#hasScreenProtect}}
 (function initializeProtectionUI() {
   const blackout = document.createElement('div');
   blackout.style.cssText = `
@@ -78,3 +79,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   ipcRenderer.on('trigger-protection', triggerProtection);
 })();
+{{/hasScreenProtect}}

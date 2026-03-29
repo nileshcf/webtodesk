@@ -15,15 +15,15 @@
     "appId": "{{appId}}",
     "productName": "{{appTitle}}",
     "directories": { "output": "dist" },
-    "files": ["main.js", "preload.js", "config.js"{{#hasModules}}, "modules/**"{{/hasModules}}],
+    "files": ["main.js", "preload.js", "config.js", "build/**"{{#hasModules}}, "modules/**"{{/hasModules}}],
     {{#isWin}}
-    "win": { "target": "nsis" }
+    "win": { "target": "nsis", "icon": "build/icon.ico" }
     {{/isWin}}
     {{#isMac}}
-    "mac": { "category": "public.app-category.utilities" }
+    "mac": { "category": "public.app-category.utilities", "icon": "build/icon.icns" }
     {{/isMac}}
     {{#isLinux}}
-    "linux": { "target": "{{linuxTarget}}" }
+    "linux": { "target": "{{linuxTarget}}", "icon": "build/icon.png" }
     {{/isLinux}}
   }
 }

@@ -21,6 +21,7 @@ Complete endpoint documentation for the WebToDesk API. All requests go through t
    - [Update Conversion](#34-update-conversion)
    - [Delete Conversion](#35-delete-conversion)
    - [Generate Electron Project](#36-generate-electron-project)
+   - [Build Endpoints (Implemented)](#37-build-endpoints-implemented)
 4. [License Management](#4-license-management)
    - [Get Current License](#41-get-current-license)
    - [Get License Dashboard](#42-get-license-dashboard)
@@ -31,35 +32,8 @@ Complete endpoint documentation for the WebToDesk API. All requests go through t
    - [Check Feature Availability](#47-check-feature-availability)
    - [Get License Restrictions](#48-get-license-restrictions)
    - [Refresh License Cache](#49-refresh-license-cache)
-5. [Build Management](#5-build-management)
-   - [Trigger Build](#51-trigger-build)
-   - [Trigger Cross-Platform Build](#52-trigger-cross-platform-build)
-   - [Get Build Status](#53-get-build-status)
-   - [Get Build Progress](#54-get-build-progress)
-   - [Get Queue Status](#55-get-queue-status)
-   - [Get Build Metrics](#56-get-build-metrics)
-   - [Cancel Build](#57-cancel-build)
-   - [Retry Failed Build](#58-retry-failed-build)
-   - [Get Available File Types](#59-get-available-file-types)
-   - [Validate Build Configuration](#510-validate-build-configuration)
-   - [Get Build History](#511-get-build-history)
-   - [Get Build Logs](#512-get-build-logs)
-6. [Version Management](#6-version-management)
-   - [Get Version History](#61-get-version-history)
-   - [Get Available Updates](#62-get-available-updates)
-   - [Get Upgrade Dialog](#63-get-upgrade-dialog)
-   - [Initiate Version Upgrade](#64-initiate-version-upgrade)
-   - [Get Upgrade Progress](#65-get-upgrade-progress)
-   - [Subscribe to Upgrade Progress](#66-subscribe-to-upgrade-progress)
-   - [Compare Versions](#67-compare-versions)
-   - [Get Auto-Upgrade Settings](#68-get-auto-upgrade-settings)
-   - [Update Auto-Upgrade Settings](#69-update-auto-upgrade-settings)
-   - [Get Rollback Capability](#610-get-rollback-capability)
-   - [Initiate Rollback](#611-initiate-rollback)
-   - [Get Rollback History](#612-get-rollback-history)
-   - [Cancel Upgrade](#613-cancel-upgrade)
-   - [Get Changelog](#614-get-changelog)
-   - [Check License Compatibility](#615-check-license-compatibility)
+
+> ⚠️ **Scope Note**: Version-management APIs are deferred in the current implementation and are not documented as active endpoints here.
 
 ---
 
@@ -619,7 +593,6 @@ Permanently deletes a conversion project.
 | `400` | `BAD_REQUEST` | Project not found |
 
 > ⚠️ **Security Gap**: No ownership check — any authenticated user can delete any project.
-
 > ⚠️ **No soft delete**: Projects are permanently removed from MongoDB.
 
 **Example**:
@@ -690,6 +663,35 @@ curl -X POST http://localhost:8080/conversion/conversions/6789abcd1234ef56789012
 
 ---
 
+### 3.7 Build Endpoints (Implemented)
+
+The codebase currently exposes build APIs through both legacy conversion routes and dedicated build routes.
+
+| Endpoint | Auth | Description |
+| --- | --- | --- |
+| `POST /conversion/conversions/{id}/build` | Yes | Trigger async build for a conversion project |
+| `GET /conversion/conversions/{id}/build/status` | Yes | Poll build status |
+| `GET /conversion/conversions/{id}/build/stream` | Yes | SSE progress stream |
+| `GET /conversion/conversions/{id}/build/download` | Yes | Redirect to artifact URL |
+| `POST /conversion/build/trigger` | Yes | Trigger build by request body (`projectId`) |
+| `GET /conversion/build/status/{projectId}` | Yes | Poll build status |
+| `GET /conversion/build/progress/{projectId}` | Yes | SSE progress stream |
+| `GET /conversion/build/queue/status` | Yes | Queue metrics |
+| `POST /conversion/build/retry/{projectId}` | Yes | Retry build |
+| `POST /conversion/build/cancel/{projectId}` | Yes | Cancel request (currently stub response) |
+| `GET /conversion/build/file-types/{targetOS}` | Yes | Supported package types per OS |
+| `POST /conversion/build/validate-config` | Yes | Build config validation (currently stub response) |
+| `GET /conversion/build/metrics` | Yes | User build metrics |
+| `GET /conversion/build/metrics/{projectId}` | Yes | Project build metrics |
+| `GET /conversion/build/history/{projectId}` | Yes | Build history |
+| `GET /conversion/build/modules?tier=<TIER>` | Yes | Module availability by tier (`TRIAL`, `STARTER`, `PRO`, `LIFETIME`) |
+| `GET /conversion/build/download/{projectId}` | Yes | Redirect to artifact URL |
+| `GET /conversion/build/logs/{projectId}` | Yes | Last known build log summary |
+
+> ℹ️ Cross-platform trigger/version-management endpoints are not active in the current backend API surface.
+
+---
+
 ## Error Response Shape
 
 All error responses follow the standard `ErrorResponse` format:
@@ -726,6 +728,8 @@ All error responses follow the standard `ErrorResponse` format:
 ## 4. License Management
 
 Base path: `/conversion/license` (gateway strips `/conversion` prefix → service receives `/license`)
+
+> ⚠️ Payment provider integration is currently deferred; upgrade endpoints are available for workflow/testing but should be treated as non-final billing behavior.
 
 ---
 
@@ -942,10 +946,8 @@ Starts the license upgrade process.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `targetTier` | `string` | Yes | Target license tier |
-| `paymentMethod` | `string` | Yes | Payment method ID |
-| `billingCycle` | `string` | No | Billing cycle (monthly/yearly/once) |
-| `promoCode` | `string` | No | Promotional code |
+| `tier` | `string` | Yes | Target license tier |
+| `billingCycle` | `string` | Yes | Billing cycle |
 
 **Success Response** — `200 OK`:
 
@@ -967,7 +969,7 @@ Starts the license upgrade process.
 
 ### 4.6 Complete License Upgrade
 
-Completes the license upgrade after successful payment.
+Completes an upgrade session.
 
 **`POST /conversion/license/upgrade/complete`**
 
@@ -977,9 +979,7 @@ Completes the license upgrade after successful payment.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `upgradeId` | `string` | Yes | Upgrade transaction ID |
-| `paymentId` | `string` | Yes | Payment confirmation ID |
-| `paymentSignature` | `string` | Yes | Payment provider signature |
+| `sessionId` | `string` | Yes | Upgrade session ID |
 
 **Success Response** — `200 OK`:
 

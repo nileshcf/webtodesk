@@ -5,7 +5,6 @@ import com.example.user_service.dto.UserProfileResponse;
 import com.example.user_service.entities.User;
 import com.example.user_service.entities.UserProfile;
 import com.example.user_service.enums.Roles;
-import com.example.user_service.repositories.UserProfileRepository;
 import com.example.user_service.repositories.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +20,6 @@ import java.util.stream.Collectors;
 public class UserService {
 
 	private final UserRepository userRepository;
-	private final UserProfileRepository userProfileRepository;
 
 	// ─────────────────────────────────────────
 	// GET /users/me

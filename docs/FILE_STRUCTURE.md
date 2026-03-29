@@ -8,7 +8,10 @@ Complete annotated file tree of the entire project repository.
 ├── .vscode/                                            # VS Code workspace settings
 ├── docker-compose.yml                                  # Docker Compose — 4 services + bridge network
 ├── pom.xml                                             # Maven parent POM — multi-module project
-├── start-all.ps1                                       # PowerShell script to start all 5 services locally
+├── start-all.ps1                                       # PowerShell script to start all 5 services locally (interactive + AI mode)
+├── docker-rebuild.ps1                                  # Rebuild Docker image with cache/no-cache and cleanup options
+├── docker-start.ps1                                    # Start container with configurable ports and conflict handling
+├── git-operations.ps1                                  # Git workflow automation (interactive UI + command mode)
 ├── README.md                                           # Project overview and setup guide
 ├── ARCHITECTURE.md                                     # Architecture docs with Mermaid diagrams
 ├── FILE_STRUCTURE.md                                   # This file

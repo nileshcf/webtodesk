@@ -12,6 +12,48 @@ WebToDesk is a **Spring Boot microservices** platform that converts websites int
 
 ---
 
+## Root Automation Scripts (Agent + User Quick Reference)
+
+Use these scripts from the repo root for local development, Docker operations, and git workflows.
+
+### Script Catalog
+
+- `start-all.ps1` — start all local services with port readiness checks
+- `docker-rebuild.ps1` — rebuild monolith image with optional cleanup and no-cache mode
+- `docker-start.ps1` — run container with configurable host/container ports
+- `git-operations.ps1` — interactive git UI and non-interactive command mode
+
+### AI-First Usage Pattern
+
+- Always pass `-NonInteractive` to avoid prompts.
+- Prefer `-OutputJson` for deterministic machine-readable output.
+- For safe unattended execution, pair with explicit action flags (for example, `-Action status`).
+
+```powershell
+.\start-all.ps1 -NonInteractive -NoBrowserPrompt -OutputJson
+.\docker-rebuild.ps1 -NoCache -RemoveOldImages -PruneDangling -NonInteractive -OutputJson
+.\docker-start.ps1 -StopExisting -KillPortProcess -NonInteractive -OutputJson
+.\git-operations.ps1 -Action status -OutputJson
+```
+
+### Runtime + Dependency Contract (Agents)
+
+- Java runtime must be **JDK 17**.
+- Local workspace default `JAVA_HOME` is `C:\Program Files\Java\jdk-17`.
+- Backend commands should use Maven wrapper (`mvnw`/`mvnw.cmd`) only.
+- Frontend dependency install should use `npm --prefix .\frontend ci` for reproducibility.
+- Prefer passing `-JavaHome` to `start-all.ps1` when Java path must be explicit.
+
+```powershell
+java -version
+$env:JAVA_HOME
+.\mvnw -v
+node -v
+npm -v
+```
+
+---
+
 ## Implementation Strategy
 
 ### Core Pattern: Module Injection via `FeatureConfig`

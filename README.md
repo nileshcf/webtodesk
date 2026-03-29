@@ -84,6 +84,65 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 
 ---
 
+## AI Environment Contract (No Guesswork)
+
+Use this contract for all local runs so Java/tooling setup is deterministic and never guessed/reset.
+
+### Required Runtime Versions
+
+- `Java`: **17** (JDK, not JRE)
+- `Node.js`: **18+**
+- `npm`: **9+**
+- `Maven`: use project wrapper (`mvnw`), no global Maven required
+
+### Local Machine Baseline (This Workspace)
+
+- Preferred local `JAVA_HOME`: `C:\Program Files\Java\jdk-17`
+- Agents should assume this path first on this machine before trying alternatives.
+
+### Where Java Is Set and Used
+
+- Script startup path: `start-all.ps1`
+  - Uses current `JAVA_HOME` by default.
+  - Can be forced per run via `-JavaHome "C:\\Program Files\\Java\\jdk-17"`.
+- Maven build/run path:
+  - Root wrapper: `./mvnw`
+  - Module wrappers: `api-gateway/mvnw`, `user-service/mvnw`, `conversion-service/mvnw`
+
+### One-Time Verification (Windows PowerShell)
+
+```powershell
+java -version
+$env:JAVA_HOME
+.\mvnw -v
+node -v
+npm -v
+```
+
+Expected: Java reports version 17.x and Maven runs via wrapper.
+
+### Deterministic Install + Start (AI/Human)
+
+```powershell
+# Frontend dependencies
+npm --prefix .\frontend ci
+
+# Backend compile check (all modules)
+.\mvnw -q -DskipTests compile
+
+# Start all services without prompts and with parseable output
+.\start-all.ps1 -NonInteractive -NoBrowserPrompt -OutputJson
+```
+
+### Rules for Agents
+
+- Do not overwrite global Java settings unless explicitly requested.
+- Prefer passing `-JavaHome` to `start-all.ps1` instead of mutating machine state.
+- Use `mvnw`/`mvnw.cmd` and avoid assuming globally installed Maven.
+- Use `npm --prefix .\frontend ci` for reproducible frontend dependency installs.
+
+---
+
 ## Local Development Setup
 
 ### 1. Clone the repository
@@ -129,6 +188,37 @@ npm run dev    # http://localhost:5173
 - **Eureka Dashboard**: http://localhost:8761
 - **API Gateway**: http://localhost:8080
 - **Frontend**: http://localhost:5173
+
+### 6. Automation Scripts (Windows)
+
+These scripts support both interactive use (for humans) and deterministic non-interactive use (for AI/automation).
+
+- `start-all.ps1` — starts all local services with readiness checks
+- `docker-rebuild.ps1` — rebuilds Docker image with cache/no-cache and cleanup options
+- `docker-start.ps1` — starts container on selected ports with optional cleanup of conflicts
+- `git-operations.ps1` — interactive git UI + command-mode actions for automation
+
+#### Quick Human Usage
+
+```powershell
+.\start-all.ps1
+.\docker-rebuild.ps1 -RemoveOldImages -PruneDangling
+.\docker-start.ps1 -StopExisting -HostPort 7860
+.\git-operations.ps1 -Action interactive
+```
+
+#### AI / Non-Interactive Usage
+
+```powershell
+.\start-all.ps1 -NonInteractive -NoBrowserPrompt -OutputJson
+.\docker-rebuild.ps1 -NoCache -RemoveOldImages -PruneDangling -NonInteractive -OutputJson
+.\docker-start.ps1 -StopExisting -KillPortProcess -NonInteractive -OutputJson
+.\git-operations.ps1 -Action status -OutputJson
+.\git-operations.ps1 -Action switch -Branch develop -NonInteractive -OutputJson
+.\git-operations.ps1 -Action merge -TargetBranch feature/my-change -NonInteractive -OutputJson
+```
+
+> Tip: prefer `-OutputJson` for machine-readable logs/results in agent workflows.
 
 ---
 
