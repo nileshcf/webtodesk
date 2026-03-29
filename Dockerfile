@@ -15,6 +15,10 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci
 
 COPY frontend/ ./
+# vite.config.ts has envDir: '..' — copy root .env so VITE_FIREBASE_* vars are
+# available at build time. Only VITE_ prefixed vars are inlined; secrets stay safe.
+# This builder stage is discarded — .env never reaches the final image.
+COPY .env /
 RUN npm run build
 
 

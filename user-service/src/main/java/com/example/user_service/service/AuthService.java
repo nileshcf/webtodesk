@@ -14,7 +14,6 @@ import com.google.firebase.auth.FirebaseAuthException;
 import com.google.firebase.auth.FirebaseToken;
 import io.jsonwebtoken.Claims;
 import jakarta.transaction.Transactional;
-import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -33,7 +32,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
 public class AuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
@@ -45,6 +43,24 @@ public class AuthService {
     private final JwtValidator jwtValidator;
     private final RedisTemplate<String, String> redisTemplate;
     private final FirebaseAuth firebaseAuth;
+
+    public AuthService(
+            UserRepository userRepository,
+            PasswordEncoder passwordEncoder,
+            AuthenticationManager authenticationManager,
+            JwtTokenProvider jwtTokenProvider,
+            JwtValidator jwtValidator,
+            RedisTemplate<String, String> redisTemplate,
+            @org.springframework.beans.factory.annotation.Autowired(required = false)
+            FirebaseAuth firebaseAuth) {
+        this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
+        this.authenticationManager = authenticationManager;
+        this.jwtTokenProvider = jwtTokenProvider;
+        this.jwtValidator = jwtValidator;
+        this.redisTemplate = redisTemplate;
+        this.firebaseAuth = firebaseAuth;
+    }
 
     @Transactional
     public RegisterResponse register(SignupRequest request) {
@@ -148,6 +164,11 @@ public class AuthService {
     }
 
     public LoginResponse googleAuth(GoogleAuthRequest request) {
+        if (firebaseAuth == null) {
+            throw new IllegalStateException(
+                    "Google sign-in is not configured. Set FIREBASE_CREDENTIALS_BASE64 to enable it.");
+        }
+
         FirebaseToken decodedToken;
         try {
             decodedToken = firebaseAuth.verifyIdToken(request.getIdToken(), true);

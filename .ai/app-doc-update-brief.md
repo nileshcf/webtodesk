@@ -1,6 +1,6 @@
 ﻿# App-Level Documentation & Upskilling Update Brief
 
-Generated: 2026-03-29 22:50:42
+Generated: 2026-03-30 00:04:37
 Scope: update project documentation from latest code/runtime changes.
 
 ## Required output files
@@ -12,18 +12,20 @@ Scope: update project documentation from latest code/runtime changes.
 ## Source change inventory
 
 ### frontend
-- [M] frontend/package.json (commit)
-- [M] frontend/package-lock.json (commit)
-- [A] frontend/src/config/firebase.ts (commit)
-- [M] frontend/tsconfig.tsbuildinfo (commit)
-- [M] frontend/vite.config.ts (commit)
+- [M] frontend/src/hooks/useAuth.tsx (working)
+- [M] frontend/src/pages/LoginPage.tsx (working)
+- [M] frontend/src/pages/RegisterPage.tsx (working)
+- [M] frontend/src/services/api.ts (working)
 
 ### root/other
 - [M] .ai/app-doc-update-brief.md (commit)
-- [A] .registry-image-tags.json (commit)
-- [M] registry-pull-run.ps1 (commit)
-- [M] registry-push.ps1 (commit)
-- [M] start-all.ps1 (commit)
+
+### runtime/deploy
+- [M] Dockerfile (working)
+
+### user-service
+- [M] user-service/src/main/java/com/example/user_service/config/FirebaseConfig.java (working)
+- [M] user-service/src/main/java/com/example/user_service/service/AuthService.java (working)
 
 ## Update rules
 1. Reflect implemented behavior only; mark roadmap/deferred items clearly.

@@ -137,6 +137,12 @@ export const authApi = {
     return res.data;
   },
 
+  async googleAuth(idToken: string): Promise<AuthTokens> {
+    const res = await api.post<AuthTokens>('/user/auth/google', { idToken });
+    saveTokens(res.data);
+    return res.data;
+  },
+
   async refresh(): Promise<void> {
     const refreshToken = getRefreshToken();
     if (!refreshToken) throw new Error('No refresh token');
