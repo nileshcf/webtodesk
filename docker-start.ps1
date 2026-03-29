@@ -107,7 +107,7 @@ try {
         Start-Sleep -Seconds 3
         $elapsed += 3
         try {
-            $r = Invoke-WebRequest -Uri "http://localhost:$HostPort/conversion/conversions/health" `
+            $r = Invoke-WebRequest -Uri "http://localhost:$HostPort/" `
                 -TimeoutSec 3 -ErrorAction SilentlyContinue
             if ($r -and $r.StatusCode -eq 200) { $healthy = $true; break }
         } catch {}
