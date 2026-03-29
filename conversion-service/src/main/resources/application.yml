@@ -1,5 +1,7 @@
 server:
   port: 8082
+  tomcat:
+    connection-timeout: 5s
 
 spring:
   application:
@@ -8,21 +10,43 @@ spring:
     mongodb:
       # Provided at runtime (GitHub Actions/Fly secrets)
       uri: ${MONGODB_URI}
+  mvc:
+    async:
+      request-timeout: -1
 
 webtodesk:
   build:
     output-dir: ${BUILD_OUTPUT_DIR:${java.io.tmpdir}/webtodesk-builds}
+    target-platform: ${WEBTODESK_BUILD_TARGET_PLATFORM:auto}
+    development-build: ${DEVELOPMENT_BUILD:false}
+    linux-target: ${WEBTODESK_LINUX_TARGET:AppImage}
+    keep-workspace-on-failure: ${KEEP_WORKSPACE_ON_FAILURE:false}
+    electron-builder:
+      debug: ${ELECTRON_BUILDER_DEBUG:false}
+    retry:
+      max-attempts: ${BUILD_RETRY_MAX_ATTEMPTS:3}
+      backoff-ms: ${BUILD_RETRY_BACKOFF_MS:3000}
+      jitter-ms: ${BUILD_RETRY_JITTER_MS:750}
     repo-url: ${REPO_URL:https://github.com/nileshcf/webtodesk.git}
   r2:
     enabled: ${R2_ENABLED:true}
-    account-id: ${R2_ACCOUNT_ID:b34ccabf01d35919541bffb8a9ad0384}
-    access-key-id: ${R2_ACCESS_KEY_ID:bf31e166b94331d80e1e5a34344b55da}
-    secret-access-key: ${R2_SECRET_ACCESS_KEY:da18810b0aa9f85f98e12c4a0f16dd7d6fba04a9910b7ed6aabe68ad2be94a61}
+    account-id: ${R2_ACCOUNT_ID}
+    access-key-id: ${R2_ACCESS_KEY_ID}
+    secret-access-key: ${R2_SECRET_ACCESS_KEY}
     bucket: ${R2_BUCKET:webtodesk-builds}
     public-url: ${R2_PUBLIC_URL:https://pub-1b61d73b19424844a83d743c392ddea5.r2.dev}
-    endpoint: https://${R2_ACCOUNT_ID:b34ccabf01d35919541bffb8a9ad0384}.r2.cloudflarestorage.com
+    endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
 
 eureka:
   client:
     service-url:
       defaultZone: http://localhost:8761/eureka/
+
+logging:
+  level:
+    root: WARN
+    com.example.conversion_service: INFO
+    org.springframework.web: WARN
+    org.springframework.data.mongodb.core: WARN
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] [pid:%X{projectId:-system}] %-5level %logger{30} - %msg%n"

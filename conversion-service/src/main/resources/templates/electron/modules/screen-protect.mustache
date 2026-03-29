@@ -1,0 +1,10 @@
+// Module: screen-protect — Tier: PRO
+// Enables OS-level content protection to prevent screenshots/recordings.
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('screen-protect')) return;
+  mainWindow.setContentProtection(true);
+}
+
+function teardown() {}
+
+module.exports = { setup, teardown };

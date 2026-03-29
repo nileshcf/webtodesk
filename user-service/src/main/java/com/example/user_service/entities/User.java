@@ -33,6 +33,7 @@ public class User {
 
     @Builder.Default
     @Column(nullable = false)
+    @Builder.Default
     private boolean emailVerified = false;
 
     @Builder.Default

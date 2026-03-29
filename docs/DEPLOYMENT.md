@@ -8,12 +8,13 @@ Production deployment guide for the WebToDesk platform.
 
 1. [Production Environment Requirements](#1-production-environment-requirements)
 2. [Docker Deployment](#2-docker-deployment)
-3. [Kubernetes Deployment](#3-kubernetes-deployment)
-4. [Environment Variable Injection](#4-environment-variable-injection)
-5. [SSL / Domain Configuration](#5-ssl--domain-configuration)
-6. [Database Migration](#6-database-migration)
-7. [Monitoring & Alerting](#7-monitoring--alerting)
-8. [Rollback Procedure](#8-rollback-procedure)
+3. [Automation Scripts (Windows)](#3-automation-scripts-windows)
+4. [Kubernetes Deployment](#4-kubernetes-deployment)
+5. [Environment Variable Injection](#5-environment-variable-injection)
+6. [SSL / Domain Configuration](#6-ssl--domain-configuration)
+7. [Database Migration](#7-database-migration)
+8. [Monitoring & Alerting](#8-monitoring--alerting)
+9. [Rollback Procedure](#9-rollback-procedure)
 
 ---
 
@@ -300,7 +301,45 @@ curl http://localhost:8761
 
 ---
 
-## 3. Kubernetes Deployment
+## 3. Automation Scripts (Windows)
+
+The repository includes PowerShell scripts at the project root that can be used by both developers and AI agents.
+
+### Script Inventory
+
+- `docker-rebuild.ps1` — rebuild image with optional cache bypass and image cleanup
+- `docker-start.ps1` — start container with port/process conflict handling
+- `start-all.ps1` — start all local Java + frontend services with readiness checks
+- `git-operations.ps1` — git operations via interactive menu or command mode
+
+### Human-Friendly Examples
+
+```powershell
+.\docker-rebuild.ps1 -RemoveOldImages -PruneDangling
+.\docker-start.ps1 -StopExisting -HostPort 7860
+.\start-all.ps1
+.\git-operations.ps1 -Action interactive
+```
+
+### AI / Automation Examples
+
+```powershell
+.\docker-rebuild.ps1 -NoCache -RemoveOldImages -PruneDangling -NonInteractive -OutputJson
+.\docker-start.ps1 -StopExisting -KillPortProcess -NonInteractive -OutputJson
+.\start-all.ps1 -NonInteractive -NoBrowserPrompt -OutputJson
+.\git-operations.ps1 -Action status -OutputJson
+.\git-operations.ps1 -Action switch -Branch develop -NonInteractive -OutputJson
+```
+
+### Agent Integration Notes
+
+- Prefer `-OutputJson` for deterministic parsing in AI pipelines.
+- Use `-NonInteractive` and `-Force`/`-ForceKillPorts` to avoid blocking prompts.
+- For destructive git operations (`force-pull`, `force-push`), pass `-NonInteractive` only in trusted automation flows.
+
+---
+
+## 4. Kubernetes Deployment
 
 > ⚠️ **No Kubernetes manifests currently exist.** Below is the recommended structure.
 
@@ -345,7 +384,7 @@ k8s/
 
 ---
 
-## 4. Environment Variable Injection
+## 5. Environment Variable Injection
 
 ### Required .env File
 
@@ -409,7 +448,7 @@ jwt:
 
 ---
 
-## 5. SSL / Domain Configuration
+## 6. SSL / Domain Configuration
 
 ### Option A: Cloudflare (Recommended for simplicity)
 
@@ -486,7 +525,7 @@ Or better, make it configurable via environment variable.
 
 ---
 
-## 6. Database Migration
+## 7. Database Migration
 
 ### Current State
 
@@ -550,7 +589,7 @@ db.conversions.createIndex({ createdBy: 1, createdAt: -1 });
 
 ---
 
-## 7. Monitoring & Alerting
+## 8. Monitoring & Alerting
 
 ### Current State
 
@@ -620,7 +659,7 @@ Configure each service to expose `/actuator/health`:
 
 ---
 
-## 8. Rollback Procedure
+## 9. Rollback Procedure
 
 ### Docker Compose Rollback
 

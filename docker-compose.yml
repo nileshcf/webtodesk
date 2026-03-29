@@ -1,60 +1,28 @@
-version: '3.8'
-
 services:
-  discovery-service:
+  webtodesk:
     build:
       context: .
-      dockerfile: discovery-service/Dockerfile
-    container_name: discovery-service
+      dockerfile: Dockerfile
+    container_name: webtodesk-app
     ports:
-      - "8761:8761"
-    networks:
-      - webtodesk-net
+      - "7860:7860"
+    env_file:
+      - .env
+    restart: unless-stopped
 
-  api-gateway:
-    build:
-      context: .
-      dockerfile: api-gateway/Dockerfile
-    container_name: api-gateway
-    ports:
-      - "8080:8080"
-    environment:
-      - SPRING_PROFILES_ACTIVE=dev
-      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
-    depends_on:
-      - discovery-service
-    networks:
-      - webtodesk-net
+    # Electron/Chromium uses shared memory for IPC.
+    # Default 64 MB causes SIGBUS crashes during electron-builder packaging.
+    shm_size: 512m
 
-  user-service:
-    build:
-      context: .
-      dockerfile: user-service/Dockerfile
-    container_name: user-service
-    ports:
-      - "8081:8081"
-    environment:
-      - SPRING_PROFILES_ACTIVE=dev
-      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
-    depends_on:
-      - discovery-service
-    networks:
-      - webtodesk-net
+    # electron-builder opens hundreds of file handles while packaging.
+    # Default nofile=1024 causes EMFILE: too many open files on larger apps.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
 
-  conversion-service:
-    build:
-      context: .
-      dockerfile: conversion-service/Dockerfile
-    container_name: conversion-service
-    ports:
-      - "8082:8082"
-    environment:
-      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
-    depends_on:
-      - discovery-service
-    networks:
-      - webtodesk-net
-
-networks:
-  webtodesk-net:
-    driver: bridge
+    # Mount the build workspace on tmpfs (RAM) instead of Docker's overlay FS.
+    # npm install + electron-builder I/O is 3-5x faster on tmpfs.
+    # Remove or reduce size if the host has < 2 GB free RAM.
+    tmpfs:
+      - /tmp/webtodesk-builds:mode=1777,size=1500m,exec

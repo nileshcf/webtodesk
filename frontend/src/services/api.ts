@@ -30,7 +30,7 @@ function saveTokens(tokens: AuthTokens) {
     localStorage.setItem('refreshToken', tokens.refreshToken);
   }
   // Schedule refresh (fallback to 15 mins if not provided)
-  scheduleRefresh(tokens.tokenExpiryInSeconds || 900);
+  scheduleRefresh(tokens.expiresIn || 900);
 }
 
 function clearTokens() {
@@ -185,8 +185,24 @@ export const authApi = {
   initFromStorage() {
     const token = getAccessToken();
     if (token) {
-      // Re-schedule refresh (assume ~10 min left since we don't store exact expiry)
-      scheduleRefresh(600);
+      // Decode JWT to find actual remaining time instead of guessing
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        const expiresAt = payload.exp * 1000; // JWT exp is in seconds
+        const remainingMs = expiresAt - Date.now();
+        if (remainingMs <= 0) {
+          // Token already expired — try refreshing immediately
+          authApi.refresh().catch(() => {
+            clearTokens();
+            window.location.href = '/login';
+          });
+        } else {
+          scheduleRefresh(Math.floor(remainingMs / 1000));
+        }
+      } catch {
+        // Fallback: assume ~10 min left if JWT can't be decoded
+        scheduleRefresh(600);
+      }
     }
   },
 };
@@ -239,5 +255,36 @@ export const conversionApi = {
 
   subscribeToBuildProgress(id: string): EventSource {
     return new EventSource(`/conversion/conversions/${id}/build/stream`);
+  },
+
+  async buildHistory(projectId: string, limit = 10) {
+    const res = await api.get(`/conversion/build/history/${projectId}?limit=${limit}`);
+    return res.data as Array<{
+      id: string; projectId: string; projectName: string; userEmail: string;
+      tier: string; result: string; buildError?: string; artifactUrl?: string;
+      buildTarget: string; enabledModules: string[]; startedAt: string;
+      completedAt: string; durationMs: number;
+    }>;
+  },
+
+  async buildMetrics(projectId: string) {
+    const res = await api.get(`/conversion/build/metrics/${projectId}`);
+    return res.data as {
+      totalBuilds: number; successfulBuilds: number; failedBuilds: number;
+      avgDurationMs: number; successRate: number;
+    };
+  },
+
+  async queueStatus() {
+    const res = await api.get('/conversion/build/queue/status');
+    return res.data as {
+      normalQueueLength: number; priorityQueueLength: number;
+      averageWaitTime: number; estimatedPosition: number;
+    };
+  },
+
+  async userBuildHistory(limit = 10) {
+    const res = await api.get(`/conversion/build/metrics?period=month`);
+    return res.data as { recentBuilds: any[]; queueStats: any };
   },
 };

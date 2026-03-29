@@ -22,28 +22,36 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 ### Current
 
 - **Website-to-Desktop Conversion** — Paste any URL and generate a ready-to-build Electron project
-- **Server-Side .exe Building** — Full local execution of `npm install` and `electron-builder` to generate `.exe` files and stream real-time logs via SSE
+- **Server-Side .exe / .deb Building** — Full local execution of `npm install` and `electron-builder` inside Docker to generate `.exe` (Windows via Wine) or `.deb` (Linux) files and stream real-time logs via SSE
 - **Cloud Object Storage** — Automatically uploads generated artifacts to Cloudflare R2 for secure, scalable distribution
+- **Licensing System** — Four-tier licensing model (Trial/Starter/Pro/Lifetime) with build limits and expiry management
+- **OS-Specific Builds** — Cross-platform builds for Windows (.exe/.msi), Linux (.AppImage/.deb/.rpm), and macOS (.dmg/.zip)
+- **Priority Queue Routing** — Tier-based build queue management with normal and priority executors
 - **Screenshot & Recording Protection** — OS-level content protection with visual deterrent overlay
 - **DevTools Blocking** — Prevents end-users from inspecting or modifying the wrapped app
-- **Cross-Platform Builds** — Generated projects support Windows (.exe/NSIS), macOS (.dmg), and Linux (AppImage)
+- **Version Upgrade System** — Automatic version detection and upgrade with license persistence
+- **License Expiry Enforcement** — Runtime license validation with blocking expiry screen
+- **Feature Module System** — Modular architecture with tier-based feature availability
 - **User Authentication** — JWT-based auth with access/refresh token rotation and Redis-backed blacklisting
 - **User Profile Management** — Update username, display name, phone, and avatar
-- **Project Dashboard** — Create, list, update, delete, and generate conversion projects
-- **Version Management** — Track and update version numbers per project
+- **Project Dashboard** — Multi-step wizard with tier selection, OS configuration, and feature toggles
+- **Real-time Build Monitoring** — SSE-based build progress tracking with queue status
 - **Custom Branding** — Set app title, project name, and custom icon per conversion
 - **Service Discovery** — Eureka-based service registry for automatic microservice routing
 - **API Gateway** — Centralized routing, JWT validation, CORS, and header forwarding
+- **Frontend Integration** — Complete React frontend with TypeScript types and custom hooks
 
 ### Planned
 
-- ⚠️ **Subscription & Billing** — Stripe/Razorpay integration with plan tiers and usage limits
+- ⚠️ **Subscription & Billing** — Stripe/Razorpay integration with plan tiers and usage limits (backend implemented, frontend integration in progress)
 - ⚠️ **Email Verification** — Field exists but flow is not implemented
 - ⚠️ **Password Reset** — Endpoint references exist but no implementation
 - ⚠️ **Admin Panel** — Role enum exists (ROLE_ADMIN) but no admin UI or endpoints
 - ⚠️ **File Upload** — Icon file upload (currently accepts filename string only)
-- ⚠️ **CI/CD Pipeline** — No GitHub Actions or GitLab CI configuration
-- ⚠️ **Monitoring & Observability** — Health checks, metrics, structured logging
+- ⚠️ **CI/CD Pipeline** — GitHub Actions workflow pending (Week 4)
+- ⚠️ **VersionUpgradeService** — Automatic version upgrade with license persistence (Week 4)
+- ⚠️ **OpenAPI Docs** — Springdoc OpenAPI integration pending (Week 4)
+- ⚠️ **Monitoring & Observability** — Prometheus metrics, structured logging
 
 ---
 
@@ -54,13 +62,15 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 | **Frontend**   | React 19, TypeScript, Vite 6, TailwindCSS 3, Framer Motion, Axios |
 | **API Gateway**| Spring Cloud Gateway, Spring Security (WebFlux), Eureka Client    |
 | **User Service** | Spring Boot 3.3.6, Spring Data JPA, Spring Security, Redis      |
-| **Conversion Service** | Spring Boot 3.3.6, Spring Data MongoDB, Validation        |
+| **Conversion Service** | Spring Boot 3.3.6, Spring Data MongoDB, Validation, Licensing |
 | **Discovery**  | Spring Cloud Netflix Eureka Server                                |
 | **Auth**       | JWT (jjwt 0.12.3), BCrypt, Redis token blacklisting              |
 | **Databases**  | PostgreSQL (users), MongoDB (conversions), Redis (token blacklist) |
 | **Build**      | Maven multi-module, Vite                                          |
 | **Containers** | Docker (multi-stage builds), Docker Compose                       |
 | **Language**   | Java 17, TypeScript 5.7                                           |
+| **Licensing**  | Tier-based system (Trial/Starter/Pro/Lifetime) with build limits |
+| **Build Queue** | Priority queue system with OS-specific routing                  |
 
 ---
 
@@ -73,6 +83,65 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 - **MongoDB 6+** (or a MongoDB Atlas cloud instance)
 - **Redis 7+** (or an Upstash cloud instance)
 - **Docker & Docker Compose** (optional, for containerized setup)
+
+---
+
+## AI Environment Contract (No Guesswork)
+
+Use this contract for all local runs so Java/tooling setup is deterministic and never guessed/reset.
+
+### Required Runtime Versions
+
+- `Java`: **17** (JDK, not JRE)
+- `Node.js`: **18+**
+- `npm`: **9+**
+- `Maven`: use project wrapper (`mvnw`), no global Maven required
+
+### Local Machine Baseline (This Workspace)
+
+- Preferred local `JAVA_HOME`: `C:\Program Files\Java\jdk-17`
+- Agents should assume this path first on this machine before trying alternatives.
+
+### Where Java Is Set and Used
+
+- Script startup path: `start-all.ps1`
+  - Uses current `JAVA_HOME` by default.
+  - Can be forced per run via `-JavaHome "C:\\Program Files\\Java\\jdk-17"`.
+- Maven build/run path:
+  - Root wrapper: `./mvnw`
+  - Module wrappers: `api-gateway/mvnw`, `user-service/mvnw`, `conversion-service/mvnw`
+
+### One-Time Verification (Windows PowerShell)
+
+```powershell
+java -version
+$env:JAVA_HOME
+.\mvnw -v
+node -v
+npm -v
+```
+
+Expected: Java reports version 17.x and Maven runs via wrapper.
+
+### Deterministic Install + Start (AI/Human)
+
+```powershell
+# Frontend dependencies
+npm --prefix .\frontend ci
+
+# Backend compile check (all modules)
+.\mvnw -q -DskipTests compile
+
+# Start all services without prompts and with parseable output
+.\start-all.ps1 -NonInteractive -NoBrowserPrompt -OutputJson
+```
+
+### Rules for Agents
+
+- Do not overwrite global Java settings unless explicitly requested.
+- Prefer passing `-JavaHome` to `start-all.ps1` instead of mutating machine state.
+- Use `mvnw`/`mvnw.cmd` and avoid assuming globally installed Maven.
+- Use `npm --prefix .\frontend ci` for reproducible frontend dependency installs.
 
 ---
 
@@ -122,6 +191,47 @@ npm run dev    # http://localhost:5173
 - **API Gateway**: http://localhost:8080
 - **Frontend**: http://localhost:5173
 
+### 6. Automation Scripts (Windows)
+
+These scripts support both interactive use (for humans) and deterministic non-interactive use (for AI/automation).
+
+- `start-all.ps1` — starts all local services with readiness checks
+- `docker-rebuild.ps1` — rebuilds Docker image with cache/no-cache and cleanup options
+- `docker-start.ps1` — starts container on selected ports with optional cleanup of conflicts
+- `registry-push.ps1` — build/tag/push image to GHCR or Docker Hub for team testing
+- `registry-pull-run.ps1` — pull shared registry image and run container directly
+- `git-operations.ps1` — interactive git UI + command-mode actions for automation
+- `ai-doc-sync.ps1` — one-go app-level update brief for `README.md`, `CHANGELOG.md`, `docs/**`, and `skills/**`
+
+#### Quick Human Usage
+
+```powershell
+.\start-all.ps1
+.\docker-rebuild.ps1 -RemoveOldImages -PruneDangling
+.\docker-start.ps1 -StopExisting -HostPort 7860
+.\registry-push.ps1 -GitHubRepo <github-user-or-org>/webtodesk -BuildFirst -Tag latest -ExtraTags v1.8.0 -RunLogin
+.\registry-pull-run.ps1 -GitHubRepo <github-user-or-org>/webtodesk -Tag latest -StopExisting
+.\git-operations.ps1 -Action interactive
+.\ai-doc-sync.ps1 -SinceRef HEAD~3
+```
+
+#### AI / Non-Interactive Usage
+
+```powershell
+.\start-all.ps1 -NonInteractive -NoBrowserPrompt -OutputJson
+.\docker-rebuild.ps1 -NoCache -RemoveOldImages -PruneDangling -NonInteractive -OutputJson
+.\docker-start.ps1 -StopExisting -KillPortProcess -NonInteractive -OutputJson
+.\registry-push.ps1 -GitHubRepo <github-user-or-org>/webtodesk -BuildFirst -Tag latest -ExtraTags v1.8.0 -RunLogin -NonInteractive -OutputJson
+.\registry-pull-run.ps1 -GitHubRepo <github-user-or-org>/webtodesk -Tag latest -StopExisting -PullAlways -NonInteractive -OutputJson
+.\git-operations.ps1 -Action status -OutputJson
+.\git-operations.ps1 -Action switch -Branch develop -NonInteractive -OutputJson
+.\git-operations.ps1 -Action merge -TargetBranch feature/my-change -NonInteractive -OutputJson
+.\ai-doc-sync.ps1 -SinceRef HEAD~5 -OutputJson
+.\ai-doc-sync.ps1 -OnlyWorkingTree -RunAgent -AgentCommand "claude -p {PROMPT_FILE}" -NonInteractive
+```
+
+> Tip: prefer `-OutputJson` for machine-readable logs/results in agent workflows.
+
 ---
 
 ## Environment Variables Reference
@@ -137,46 +247,76 @@ npm run dev    # http://localhost:5173
 | `SPRING_DATA_MONGODB_URI` | conversion-service | Yes | MongoDB connection URI | `mongodb://localhost:27017/webtodesk` |
 | `EUREKA_CLIENT_SERVICEURL_DEFAULTZONE` | all services | Yes | Eureka server URL | `http://localhost:8761/eureka/` |
 | `SPRING_PROFILES_ACTIVE` | all services | No | Active Spring profile | `dev` / `prod` |
-| `USER_SERVICE_DB_PASSWORD` | user-service (prod) | Prod only | Production DB password | `****` |
+| `R2_ACCOUNT_ID` | conversion-service | Yes (prod) | Cloudflare R2 account ID | `b34ccabf...` |
+| `R2_ACCESS_KEY_ID` | conversion-service | Yes (prod) | R2 access key | `...` |
+| `R2_SECRET_ACCESS_KEY` | conversion-service | Yes (prod) | R2 secret key | `...` |
+| `R2_BUCKET` | conversion-service | No | R2 bucket name | `webtodesk-builds` |
+| `R2_PUBLIC_URL` | conversion-service | No | R2 public CDN URL | `https://pub-xxx.r2.dev` |
+| `DEVELOPMENT_BUILD` | conversion-service | No | Bypass license validation + tier gating | `true` |
+| `WEBTODESK_BUILD_TARGET_PLATFORM` | conversion-service | No | Override build target: `auto`/`win`/`linux`/`mac` | `auto` |
+| `BUILD_OUTPUT_DIR` | conversion-service | No | Workspace dir for electron builds | `/tmp/webtodesk-builds` |
 
-> ⚠️ **No `.env.example` file currently exists in the repository.** This is a gap that should be addressed.
+> Copy `.env` to configure all secrets. `DEVELOPMENT_BUILD=true` is set in `.env` for the Docker container to bypass license checks during development.
 
 ---
 
 ## Running with Docker
 
 ```bash
-# Build and start all services
-docker-compose up --build
+# Build and start the monolith container (all services in one image)
+docker compose build --build-arg NODE_MAJOR=20 --build-arg ELECTRON_VERSION=38.2.2 --build-arg ELECTRON_BUILDER_VERSION=26.0.12
+docker compose up -d
 
-# Services will be available at:
-#   Discovery:  http://localhost:8761
-#   Gateway:    http://localhost:8080
-#   User:       http://localhost:8081
-#   Converter:  http://localhost:8082
+# Or use the helper scripts (Windows)
+.\docker-rebuild.ps1
+.\docker-start.ps1 -StopExisting
+
+# App is available at:
+#   Frontend + API:  http://localhost:7860
 ```
 
-> ⚠️ **Note**: The current `docker-compose.yml` does not include PostgreSQL, MongoDB, or Redis containers. You must provide external database instances or add database services to the compose file.
+> **Monolith mode**: All four Spring Boot services + React frontend run in a single container behind Nginx on port 7860. Cloud services (Neon PostgreSQL, Upstash Redis, MongoDB Atlas, Cloudflare R2) are injected via `.env` — no local database containers needed.
 
-> ⚠️ **Note**: Dockerfiles are missing for `discovery-service` and `conversion-service`. Only `api-gateway` and `user-service` have Dockerfiles.
+> **tmpfs build workspace**: The build workspace (`/tmp/webtodesk-builds`) is mounted as `tmpfs` with `exec` for maximum I/O speed during `npm install` and `electron-builder` execution. Docker's default `noexec` tmpfs flag is explicitly overridden — this is required for electron-builder to run.
+
+> **Windows builds via Wine**: The container includes Wine 6 (wine32 + wine64 + i386 arch) for cross-compiling Windows `.exe` installers on Linux.
+
+### Share One Image for Team Testing
+
+```powershell
+# Publisher machine: build + push to registry (GHCR shown)
+.\registry-push.ps1 -GitHubRepo <github-user-or-org>/webtodesk -BuildFirst -Tag latest -ExtraTags v1.8.0 -RunLogin
+
+# Tester machine: pull + run the exact same image
+.\registry-pull-run.ps1 -GitHubRepo <github-user-or-org>/webtodesk -Tag latest -StopExisting -PullAlways
+```
+
+> Use immutable version tags (for example, `v1.8.0`) for reproducible team testing, and keep `latest` as a convenience tag.
 
 ---
 
 ## Running Tests
 
-> ⚠️ **No tests currently exist in the codebase.** This is a critical gap. The project has no unit tests, integration tests, or end-to-end tests.
+**83 tests passing** across `conversion-service`.
 
-When tests are added:
+```powershell
+# Windows (PowerShell) — conversion-service full suite
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-17"
+.\mvnw.cmd clean test -pl conversion-service "-DMONGODB_URI=mongodb://localhost:27017/test"
 
-```bash
-# Backend (Maven)
-./mvnw test                           # Run all module tests
-./mvnw test -pl user-service          # Run user-service tests only
-
-# Frontend
-cd frontend
-npm test                              # (test script not yet configured)
+# All modules
+.\mvnw.cmd test
 ```
+
+| Test Class | Count | Scope |
+|---|---|---|
+| `ConversionControllerTest` | 10 | Controller layer |
+| `LicenseControllerTest` | 12 | License endpoints |
+| `ConversionServiceTest` | 18 | Service + entity |
+| `LicenseServiceTest` | 17 | Tier validation, quota |
+| `ModuleRegistryTest` | 19 | Module tier gating |
+| `TemplateEngineTest` | 7 | Mustache rendering |
+| **Total** | **83** | **All passing** |
 
 ---
 
@@ -218,7 +358,26 @@ See [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) for full production deployment 
 
 ## Subscription & Billing Model
 
-> ⚠️ **Not yet implemented.** See [`docs/SUBSCRIPTION_AND_BILLING.md`](./docs/SUBSCRIPTION_AND_BILLING.md) for the planned billing architecture and [`docs/IMPROVEMENTS.md`](./docs/IMPROVEMENTS.md) for the implementation roadmap.
+**✅ Implemented (Backend + Frontend Integration)**
+
+WebToDesk now features a comprehensive four-tier licensing system:
+
+| Tier | Price | Duration | Build Limits | Features |
+|------|--------|-----------|--------------|----------|
+| **Trial** | Free | 30 days | 4 builds total (2 apps × 1 update) | Basic features, normal queue |
+| **Starter** | $9/mo | 1 year | 120 builds (10/month) | Priority queue, advanced features |
+| **Pro** | $29/mo | 5 years | 3,000 builds (50/month) | All features, priority support |
+| **Lifetime** | $299 | Unlimited | Unlimited (fair use) | All features, lifetime updates |
+
+**Key Features:**
+- **OS-specific builds** for Windows, Linux, and macOS
+- **Priority queue routing** for paid tiers
+- **License expiry enforcement** with blocking screen
+- **Automatic version upgrades** with license persistence
+- **Real-time build monitoring** with SSE updates
+- **Feature module system** with tier-based availability
+
+See [`skills/conversion-service.md`](./skills/conversion-service.md) for complete technical implementation details and [`skills/FEATURES.md`](./skills/FEATURES.md) for feature specifications.
 
 ---
 
@@ -249,6 +408,11 @@ This project is proprietary software. All rights reserved.
 
 ## Related Documentation
 
+### Core Documentation
+- [skills/FEATURES.md](./skills/FEATURES.md) — **Complete feature specifications and licensing system**
+- [skills/conversion-service.md](./skills/conversion-service.md) — **Technical implementation details and architecture**
+
+### Legacy Documentation
 - [ARCHITECTURE.md](./docs/ARCHITECTURE.md) — System architecture with Mermaid diagrams
 - [FILE_STRUCTURE.md](./docs/FILE_STRUCTURE.md) — Annotated file tree
 - [DB_SCHEMA.md](./docs/DB_SCHEMA.md) — Database schema documentation
@@ -256,3 +420,9 @@ This project is proprietary software. All rights reserved.
 - [SUBSCRIPTION_AND_BILLING.md](./docs/SUBSCRIPTION_AND_BILLING.md) — Billing model documentation
 - [DEPLOYMENT.md](./docs/DEPLOYMENT.md) — Production deployment guide
 - [IMPROVEMENTS.md](./docs/IMPROVEMENTS.md) — Prioritized improvement recommendations
+
+### Frontend Integration
+- **TypeScript Types**: `frontend/src/types/license.ts`, `frontend/src/types/build.ts`, `frontend/src/types/modules.ts`, `frontend/src/types/upgrade.ts`
+- **API Services**: `frontend/src/services/licenseApi.ts`, `frontend/src/services/buildApi.ts`, `frontend/src/services/versionApi.ts`
+- **Custom Hooks**: `frontend/src/hooks/useLicense.ts`, `frontend/src/hooks/useBuildQueue.ts`
+- **Component Architecture**: Multi-step wizard, license management, build queue monitoring

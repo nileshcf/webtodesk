@@ -1,0 +1,71 @@
+const { app, BrowserWindow, globalShortcut, ipcMain, shell } = require('electron');
+const path = require('path');
+const config = require('./config');
+const { appTitle, websiteUrl, iconFile } = config;
+{{{moduleRequires}}}
+async function createWindow() {
+  const getIconPath = () =>
+    path.join(__dirname, 'build',
+      process.platform === 'darwin' ? 'icon.icns' :
+      process.platform === 'win32'  ? iconFile : 'icon.png');
+
+  const mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    title: appTitle,
+    icon: getIconPath(),
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
+    }
+  });
+
+  mainWindow.once('ready-to-show', () => mainWindow.show());
+
+  mainWindow.loadURL(websiteUrl).catch(err => {
+    console.error('Failed to load URL:', err.message);
+  });
+
+  mainWindow.webContents.on('page-title-updated', event => {
+    event.preventDefault();
+    mainWindow.setTitle(appTitle);
+  });
+
+  mainWindow.setMenuBarVisibility(false);
+
+{{#hasScreenProtect}}
+  const registerShortcuts = () => {
+    const shortcuts = [
+      'PrintScreen', 'Alt+PrintScreen', 'Super+Shift+S',
+      'Super+PrintScreen', 'Command+Shift+3', 'Command+Shift+4', 'Command+Shift+5'
+    ];
+    shortcuts.forEach(shortcut => {
+      try {
+        globalShortcut.register(shortcut, () => {
+          if (!mainWindow.isDestroyed()) mainWindow.webContents.send('trigger-protection');
+        });
+      } catch (_) {}
+    });
+  };
+  registerShortcuts();
+  mainWindow.on('focus', registerShortcuts);
+  mainWindow.on('blur', () => globalShortcut.unregisterAll());
+{{/hasScreenProtect}}
+{{{moduleSetups}}}
+}
+
+app.whenReady().then(createWindow);
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('activate', () => {
+  if (!BrowserWindow.getAllWindows().length) createWindow();
+});
+
+app.on('will-quit', () => globalShortcut.unregisterAll());
+
+ipcMain.on('open-external', (event, url) => shell.openExternal(url));

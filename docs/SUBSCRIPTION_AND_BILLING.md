@@ -1,8 +1,8 @@
 # WebToDesk — Subscription & Billing
 
-> ⚠️ **STATUS: NOT YET IMPLEMENTED**
+> ⚠️ **STATUS: PARTIALLY IMPLEMENTED (Billing Deferred)**
 >
-> This document describes the **planned** subscription and billing architecture for WebToDesk. No payment gateway integration, subscription entities, webhook handlers, or plan enforcement logic currently exists in the codebase.
+> License tiers and feature-gating flows exist for testing (`TRIAL`, `STARTER`, `PRO`, `LIFETIME`), but payment gateway integration, webhook reconciliation, and production billing lifecycle are deferred.
 
 ---
 
@@ -40,10 +40,10 @@
 
 ### Current State
 
-- All users can create unlimited conversion projects (no enforcement)
-- All features are available to all users (no gating)
-- No plan concept exists in the data model
-- The `Roles` enum has `ROLE_USER`, `ROLE_ADMIN`, `ROLE_MODERATOR` but these are not tied to subscription tiers
+- License tier model exists in conversion domain (`TRIAL`, `STARTER`, `PRO`, `LIFETIME`)
+- License APIs exist under `/conversion/license/**` for validation, restrictions, dashboard, and upgrade workflow stubs
+- Tier-aware module visibility/testing is available via `/conversion/build/modules?tier=...`
+- Payment provider integration remains deferred (no finalized checkout/webhook production flow)
 
 ---
 

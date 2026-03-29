@@ -9,7 +9,7 @@ export interface AuthTokens {
   accessToken: string;
   refreshToken?: string;
   tokenType: string;
-  tokenExpiryInSeconds: number;
+  expiresIn: number;       // seconds — matches backend LoginResponse.expiresIn / RefreshResponse.expiresIn
 }
 
 export interface LoginRequest {
@@ -39,6 +39,8 @@ export interface ConversionProject {
   buildProgress?: string | null;
   createdAt: string;
   updatedAt: string;
+  enabledModules?: string[];
+  targetPlatform?: string;
 }
 
 export interface BuildStatusResponse {
@@ -56,6 +58,8 @@ export interface CreateConversionRequest {
   websiteUrl: string;
   appTitle: string;
   iconFile?: string;
+  enabledModules?: string[];
+  targetPlatform?: string;
 }
 
 export interface ElectronConfig {
