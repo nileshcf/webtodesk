@@ -162,6 +162,11 @@ public class LicenseService {
         return restrictions.allowedFeatures().contains(featureId);
     }
 
+    /** Returns the best tier found across all user projects (TRIAL if none exist). */
+    public LicenseTier getUserBestTier(String userEmail) {
+        return getCurrentLicense(userEmail).tier();
+    }
+
     /** Force-refresh the cache for this user. */
     public LicenseInfoResponse refreshLicense(String userEmail) {
         evictCache(userEmail);

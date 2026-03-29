@@ -34,6 +34,13 @@ public class ConversionController {
         return ResponseEntity.ok(conversionService.create(request, userEmail));
     }
 
+    @Operation(summary = "Aggregate stats for the authenticated user (project counts, build quota, tier)")
+    @GetMapping("/stats")
+    public ResponseEntity<ConversionStatsResponse> getStats(
+            @RequestHeader("X-User-Email") String userEmail) {
+        return ResponseEntity.ok(conversionService.getStats(userEmail));
+    }
+
     @Operation(summary = "List all projects for the authenticated user")
     @GetMapping
     public ResponseEntity<List<ConversionResponse>> list(

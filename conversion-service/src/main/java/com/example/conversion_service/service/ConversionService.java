@@ -6,6 +6,7 @@ import com.example.conversion_service.dto.*;
 import com.example.conversion_service.entity.ConversionProject;
 import com.example.conversion_service.entity.ConversionProject.ConversionStatus;
 import com.example.conversion_service.entity.ConversionProject.LicenseTier;
+import com.example.conversion_service.exception.LicenseViolationException;
 import com.example.conversion_service.exception.ProjectNotFoundException;
 import com.example.conversion_service.repository.ConversionRepository;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +33,7 @@ public class ConversionService {
     private final ConversionRepository repository;
     private final TemplateEngine templateEngine;
     private final ModuleRegistry moduleRegistry;
+    private final LicenseService licenseService;
 
     @Value("${webtodesk.build.linux-target:AppImage}")
     private String linuxTarget;
@@ -42,7 +44,9 @@ public class ConversionService {
 
         log.info("Creating conversion project '{}' for user: {}", request.projectName(), createdBy);
 
-
+        // Derive the user's best tier and hard-enforce module access
+        LicenseTier userTier = licenseService.getUserBestTier(createdBy);
+        validateModuleTierAccess(request.enabledModules(), userTier);
 
         ConversionProject project = ConversionProject.builder()
 
@@ -102,7 +106,11 @@ public class ConversionService {
 
         ConversionProject project = findOrThrow(id);
 
-
+        // Enforce tier gating when modules are being changed
+        if (request.enabledModules() != null) {
+            LicenseTier tier = project.getTier() != null ? project.getTier() : LicenseTier.TRIAL;
+            validateModuleTierAccess(request.enabledModules(), tier);
+        }
 
         if (request.projectName() != null) project.setProjectName(sanitizeProjectName(request.projectName()));
 
@@ -298,6 +306,28 @@ public class ConversionService {
 
 
 
+    /** Aggregate stats for a user's dashboard. */
+    public ConversionStatsResponse getStats(String userEmail) {
+        List<ConversionProject> projects = repository.findByCreatedByOrderByCreatedAtDesc(userEmail);
+
+        int total    = projects.size();
+        int draft    = (int) projects.stream().filter(p -> p.getStatus() == ConversionStatus.DRAFT).count();
+        int ready    = (int) projects.stream().filter(p -> p.getStatus() == ConversionStatus.READY).count();
+        int building = (int) projects.stream().filter(p -> p.getStatus() == ConversionStatus.BUILDING).count();
+        int failed   = (int) projects.stream().filter(p -> p.getStatus() == ConversionStatus.FAILED).count();
+        int totalBuilds = projects.stream()
+                .mapToInt(p -> p.getBuildCount() != null ? p.getBuildCount() : 0).sum();
+
+        LicenseInfoResponse license = licenseService.getCurrentLicense(userEmail);
+        int allowed   = license.buildsAllowed();
+        int remaining = Math.max(0, allowed - totalBuilds);
+
+        return new ConversionStatsResponse(
+                userEmail, total, draft, ready, building, failed,
+                totalBuilds, allowed, remaining,
+                license.tier(), license.licenseExpiresAt());
+    }
+
     /**
 
      * Exposes the raw entity for build status checks. Used by controller for BuildStatusResponse.
@@ -313,6 +343,23 @@ public class ConversionService {
 
 
     // ─── Private Helpers ──────────────────────────────────────
+
+    /**
+     * Throws {@link LicenseViolationException} if any requested module key requires
+     * a higher tier than the user currently holds.
+     */
+    private void validateModuleTierAccess(List<String> requestedModules, LicenseTier tier) {
+        if (requestedModules == null || requestedModules.isEmpty()) return;
+        List<String> blocked = requestedModules.stream()
+                .filter(key -> !moduleRegistry.isAvailable(key, tier))
+                .filter(key -> moduleRegistry.get(key).isPresent()) // only known modules
+                .toList();
+        if (!blocked.isEmpty()) {
+            throw new LicenseViolationException(
+                    "Module(s) " + blocked + " require a higher tier than " + tier +
+                    ". Upgrade to PRO or LIFETIME to enable these features.");
+        }
+    }
 
     private ConversionProject findOrThrow(String id) {
         return repository.findById(id)
