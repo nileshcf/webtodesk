@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Mail, Lock, AlertCircle, Loader2 } from 'lucide-react';
-import { FcGoogle } from 'react-icons/fc';
 import { useAuth } from '../hooks/useAuth';
 
 export default function LoginPage() {
@@ -10,8 +9,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
-  const { login, loginWithGoogle } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -52,38 +50,6 @@ export default function LoginPage() {
               <p className="text-sm text-red-300">{error}</p>
             </motion.div>
           )}
-
-          <button
-            onClick={async () => {
-              setError('');
-              setGoogleLoading(true);
-              try {
-                await loginWithGoogle();
-                navigate('/dashboard');
-              } catch (err: any) {
-                setError(err.message || 'Google sign-in failed.');
-              } finally {
-                setGoogleLoading(false);
-              }
-            }}
-            disabled={loading || googleLoading}
-            className="glass-card w-full flex items-center justify-center gap-3 py-2 px-4 rounded-lg hover:opacity-90 transition mb-4"
-          >
-            {googleLoading ? (
-              <Loader2 className="animate-spin w-5 h-5 text-white/70" />
-            ) : (
-              <>
-                <FcGoogle className="w-5 h-5" />
-                <span className="text-sm">Continue with Google</span>
-              </>
-            )}
-          </button>
-
-          <div className="flex items-center gap-2 mb-6">
-            <hr className="flex-1 border-white/10" />
-            <span className="text-xs text-white/30 uppercase tracking-widest">or email</span>
-            <hr className="flex-1 border-white/10" />
-          </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>

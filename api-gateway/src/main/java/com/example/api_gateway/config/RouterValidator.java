@@ -14,7 +14,6 @@ public class RouterValidator {
 			"/user/auth/register",
 			"/user/auth/login",
 			"/user/auth/refresh",
-			"/user/auth/google",
 			"/user/auth/forgot-password",
 			"/user/auth/reset-password",
 			"/actuator/health",

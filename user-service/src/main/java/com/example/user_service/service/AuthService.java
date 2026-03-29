@@ -6,13 +6,8 @@ import com.example.common.security.JwtValidator;
 import com.example.user_service.dto.*;
 import com.example.user_service.entities.User;
 import com.example.user_service.entities.UserProfile;
-import com.example.user_service.enums.AuthProvider;
 import com.example.user_service.enums.Roles;
-import com.example.user_service.repositories.UserProfileRepository;
 import com.example.user_service.repositories.UserRepository;
-import com.google.firebase.auth.FirebaseAuth;
-import com.google.firebase.auth.FirebaseAuthException;
-import com.google.firebase.auth.FirebaseToken;
 import io.jsonwebtoken.Claims;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -27,8 +22,6 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -38,13 +31,11 @@ import java.util.stream.Collectors;
 public class AuthService {
 
     private final UserRepository userRepository;
-    private final UserProfileRepository userProfileRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JwtTokenProvider jwtTokenProvider;
     private final JwtValidator jwtValidator;
     private final RedisTemplate<String, String> redisTemplate;
-    private final FirebaseAuth firebaseAuth;
 
     @Transactional
     public RegisterResponse register(SignupRequest request) {
@@ -145,90 +136,6 @@ public class AuthService {
             log.error("Unexpected error during login for email: {} - Error: {}", request.email(), e.getMessage(), e);
             throw new RuntimeException("Login failed due to unexpected error", e);
         }
-
-        // 2. Fetch user — guaranteed to exist after authentication passes
-        User user = userRepository.findByEmail(request.email())
-                .orElseThrow(() -> new RuntimeException("User not found"));
-
-        return generateLoginResponse(user);
-    }
-    
-    public LoginResponse googleAuth(GoogleAuthRequest request) {
-        FirebaseToken decodedToken;
-        try {
-            decodedToken = firebaseAuth.verifyIdToken(request.getIdToken(), true);
-        } catch (FirebaseAuthException e) {
-            log.error("Invalid Firebase token", e);
-            throw new RuntimeException("Invalid Firebase token", e);
-        }
-
-        String uid = decodedToken.getUid();
-        String email = decodedToken.getEmail();
-        String name = decodedToken.getName();
-        String picture = decodedToken.getPicture();
-
-        Optional<User> existingUser = userRepository.findByEmail(email);
-        User user;
-
-        if (existingUser.isEmpty()) {
-            String dummyPassword = UUID.randomUUID().toString();
-            String encodedPassword = passwordEncoder.encode(dummyPassword);
-
-            user = new User();
-            user.setUsername(email.split("@")[0] + "_" + UUID.randomUUID().toString().substring(0, 5));
-            user.setEmail(email);
-            user.setPassword(encodedPassword);
-            user.setAuthProvider(AuthProvider.GOOGLE);
-            user.setEmailVerified(true);
-            user.setRoles(List.of(Roles.ROLE_USER));
-            user.setCreatedAt(LocalDateTime.now());
-
-            UserProfile profile = new UserProfile();
-            profile.setName(name);
-            profile.setAvatarUrl(picture);
-            profile.setPhoneNumber(null);
-            profile.setUser(user);
-
-            user.setProfile(profile);
-            userRepository.save(user);
-
-            log.info("User {} registered successfully via Google", user.getEmail());
-        } else {
-            user = existingUser.get();
-        }
-
-        return generateLoginResponse(user);
-    }
-
-    private LoginResponse generateLoginResponse(User user) {
-
-        // 3. Convert Enum roles to Strings for JWT
-        List<String> roleStrings = user.getRoles().stream()
-                .map(Roles::name)                         // ROLE_USER enum → "ROLE_USER" String
-                .collect(Collectors.toList());
-
-        // 4. Prepare Claims
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("userId", user.getId());
-        claims.put("roles", roleStrings);                 // ✅ Strings in JWT, not Enum
-        claims.put("email", user.getEmail());
-        claims.put("username", user.getUsername());
-
-        // 5. Generate tokens
-        String accessToken  = jwtTokenProvider.generateAccessToken(
-                user.getEmail(), claims, JwtConstants.ACCESS_TOKEN_EXPIRY);
-        String refreshToken = jwtTokenProvider.generateRefreshToken(
-                user.getEmail(), JwtConstants.REFRESH_TOKEN_EXPIRY);
-
-        return new LoginResponse(
-                accessToken,
-                refreshToken,
-                "Bearer",
-                JwtConstants.ACCESS_TOKEN_EXPIRY / 1000,
-                user.getId(),
-                user.getEmail(),
-                roleStrings
-        );
     }
 
     public RefreshResponse refreshToken(RefreshRequest request) {
