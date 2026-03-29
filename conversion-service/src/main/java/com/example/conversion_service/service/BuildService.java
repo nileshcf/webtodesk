@@ -236,6 +236,18 @@ public class BuildService {
             throw new IOException("npm install failed with exit code " + result.exitCode() + "\n" + result.outputTail());
         }
 
+        // Restore execute bits on .bin/ scripts — npm cache mount (BuildKit --mount=type=cache)
+        // can strip them, causing exit code 126 / "Permission denied" when electron-builder runs.
+        if (!isWindows()) {
+            Path binDir = workspace.resolve("node_modules").resolve(".bin");
+            if (Files.isDirectory(binDir)) {
+                runProcess(project.getId(), workspace, "chmod-bin",
+                        new String[]{"chmod", "-R", "+x", binDir.toAbsolutePath().toString()},
+                        null);
+                log.debug("Restored execute bits on node_modules/.bin/");
+            }
+        }
+
         log.info("npm install completed for '{}'", project.getProjectName());
     }
 
