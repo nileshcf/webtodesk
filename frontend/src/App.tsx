@@ -26,18 +26,26 @@ function AppShellLoading() {
   );
 }
 
+/** Blocks unauthenticated access → redirects to /login */
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
   if (isLoading) return <AppShellLoading />;
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
 }
 
+/** Blocks authenticated access → redirects to /dashboard */
+function GuestRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, isLoading } = useAuth();
+  if (isLoading) return <AppShellLoading />;
+  return isAuthenticated ? <Navigate to="/dashboard" replace /> : <>{children}</>;
+}
+
 function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
+      <Route path="/login" element={<GuestRoute><LoginPage /></GuestRoute>} />
+      <Route path="/register" element={<GuestRoute><RegisterPage /></GuestRoute>} />
       <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
     </Routes>

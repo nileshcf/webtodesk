@@ -43,7 +43,7 @@ function Test-Yes {
 }
 
 $result = [ordered]@{
-    script  = "docker-start.ps1"
+    script    = "docker-start.ps1"
     container = $ContainerName
     hostPort  = $HostPort
     success   = $false
@@ -60,14 +60,14 @@ try {
     Write-Ok "Docker is available"
 
     # Enable BuildKit (consistent with docker-rebuild.ps1)
-    $env:DOCKER_BUILDKIT         = "1"
+    $env:DOCKER_BUILDKIT = "1"
     $env:COMPOSE_DOCKER_CLI_BUILD = "1"
 
     # Verify an image exists for the compose service before trying to start
     # docker compose images -q only shows images of running/stopped containers,
     # so query docker images directly for the expected compose image name.
     $builtImage = docker images --format "{{.Repository}}:{{.Tag}}" 2>$null |
-        Where-Object { $_ -match "webtodesk" }
+    Where-Object { $_ -match "webtodesk" }
     if (-not $builtImage) {
         throw "No image found for compose service. Run .\docker-rebuild.ps1 first."
     }
@@ -79,7 +79,7 @@ try {
     }
 
     $portInUse = Get-NetTCPConnection -LocalPort $HostPort -ErrorAction SilentlyContinue |
-        Where-Object { $_.State -eq "Listen" }
+    Where-Object { $_.State -eq "Listen" }
     if ($portInUse) {
         if ($KillPortProcess) {
             foreach ($p in $portInUse) {
@@ -87,7 +87,8 @@ try {
                     Stop-Process -Id $p.OwningProcess -Force -ErrorAction SilentlyContinue
                 }
             }
-        } elseif (-not (Test-Yes -Prompt "Port $HostPort is in use. Continue anyway?")) {
+        }
+        elseif (-not (Test-Yes -Prompt "Port $HostPort is in use. Continue anyway?")) {
             throw "Host port $HostPort is already in use"
         }
     }
@@ -108,26 +109,29 @@ try {
         $elapsed += 3
         try {
             $r = Invoke-WebRequest -Uri "http://localhost:$HostPort/" `
-                -TimeoutSec 3 -ErrorAction SilentlyContinue
+                -TimeoutSec 3 -UseBasicParsing -ErrorAction SilentlyContinue
             if ($r -and $r.StatusCode -eq 200) { $healthy = $true; break }
-        } catch {}
+        }
+        catch {}
         if ($elapsed % 15 -eq 0) { Write-Info "  Still waiting... (${elapsed}s)" }
     }
 
-    $status = docker compose ps --format "{{.Status}}" $ContainerName 2>$null
+    $status = docker compose ps --format "{{.Status}}" webtodesk 2>$null
 
     $result.success = $true
     $result.healthy = $healthy
-    $result.status  = $status
-    $result.url     = "http://localhost:$HostPort"
+    $result.status = $status
+    $result.url = "http://localhost:$HostPort"
 
     if ($OutputJson) {
         $result | ConvertTo-Json -Depth 6
-    } else {
+    }
+    else {
         if ($healthy) {
             Write-Ok "Stack is healthy ($status)"
-        } else {
-            Write-Info "Stack is running but health endpoint not ready yet — services may still be starting"
+        }
+        else {
+            Write-Info "Stack is running but health endpoint not ready yet -- services may still be starting"
             Write-Host "  Check: docker compose logs -f $ContainerName" -ForegroundColor White
         }
         Write-Host "URL:  http://localhost:$HostPort" -ForegroundColor Cyan

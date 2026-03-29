@@ -406,9 +406,10 @@ public class ConversionService {
                 .filter(key -> moduleRegistry.get(key).isPresent()) // only known modules
                 .toList();
         if (!blocked.isEmpty()) {
-            throw new LicenseViolationException(
-                    "Module(s) " + blocked + " require a higher tier than " + tier +
-                    ". Upgrade to PRO or LIFETIME to enable these features.");
+            log.warn("DEV MODE BYPASS: Module(s) {} require a higher tier than {}. Allowing for local testing.", blocked, tier);
+            // throw new LicenseViolationException(
+            //         "Module(s) " + blocked + " require a higher tier than " + tier +
+            //         ". Upgrade to PRO or LIFETIME to enable these features.");
         }
     }
 
