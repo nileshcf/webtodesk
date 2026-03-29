@@ -7,6 +7,12 @@ import type {
   TitleBarConfig,
   WatermarkConfig,
   ExpiryConfig,
+  SystemTrayConfig,
+  RightClickConfig,
+  AutoUpdateConfig,
+  KeyBindingsConfig,
+  WindowPolishConfig,
+  ClipboardConfig,
 } from '../types';
 
 // ─── Types ──────────────────────────────────────────────
@@ -49,8 +55,16 @@ const ALL_MODULES: ModuleInfo[] = [
   { key: 'title-bar',     name: 'Title Bar',         description: 'Set a custom window title that persists across page navigations',                    requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: true  },
   { key: 'watermark',     name: 'Watermark Badge',   description: 'Persistent badge near window controls showing trial status and days remaining',       requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: true  },
   { key: 'expiry',        name: 'Trial Expiry',      description: 'Locks the app with a full-screen overlay after a specified expiry date',             requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: true  },
-  { key: 'screen-protect',name: 'Screen Protection', description: 'OS-level content protection to prevent screenshots and recordings',                  requiredTier: LicenseTier.PRO,   available: false, hasConfig: false },
-  { key: 'deep-link',     name: 'Deep Link',         description: 'Register a custom URL protocol so the app can be launched via myapp:// links',       requiredTier: LicenseTier.PRO,   available: false, hasConfig: false },
+  { key: 'notifications',  name: 'Native Notifications',  description: 'Grants the Notification permission so the web Notifications API works natively', requiredTier: LicenseTier.STARTER, available: false, hasConfig: false },
+  { key: 'system-tray',    name: 'System Tray',            description: 'Adds a tray icon with tooltip and configurable context menu',                   requiredTier: LicenseTier.STARTER, available: false, hasConfig: true  },
+  { key: 'dark-mode',      name: 'Dark / Light Mode Sync', description: 'Syncs OS dark/light theme to web content via IPC and CSS class injection',      requiredTier: LicenseTier.STARTER, available: false, hasConfig: false },
+  { key: 'right-click',    name: 'Right-Click Control',    description: 'Suppresses or replaces the browser context menu with a minimal native menu',    requiredTier: LicenseTier.STARTER, available: false, hasConfig: true  },
+  { key: 'auto-update',    name: 'Auto-Update',            description: 'Configures electron-updater to check for and install new versions silently',    requiredTier: LicenseTier.STARTER, available: false, hasConfig: true  },
+  { key: 'key-bindings',   name: 'Custom Key Bindings',    description: 'Registers configurable in-app keyboard shortcuts (reload, back, fullscreen…)',  requiredTier: LicenseTier.STARTER, available: false, hasConfig: true  },
+  { key: 'window-polish',  name: 'Window Polish',          description: 'Applies visual enhancements: acrylic/vibrancy blur, always-on-top, opacity',    requiredTier: LicenseTier.STARTER, available: false, hasConfig: true  },
+  { key: 'clipboard',      name: 'Clipboard Integration',  description: 'Exposes clipboard read/write to the renderer via a secure contextBridge API',    requiredTier: LicenseTier.STARTER, available: false, hasConfig: true  },
+  { key: 'screen-protect', name: 'Screen Protection',      description: 'OS-level content protection to prevent screenshots and recordings',             requiredTier: LicenseTier.PRO,     available: false, hasConfig: false },
+  { key: 'deep-link',      name: 'Deep Link',              description: 'Register a custom URL protocol so the app can be launched via myapp:// links',  requiredTier: LicenseTier.PRO,     available: false, hasConfig: false },
 ];
 
 const STEPS = ['Basic Info', 'Features', 'Review'] as const;
@@ -228,6 +242,116 @@ function ExpiryPanel({ cfg, onChange }: { cfg: ExpiryConfig; onChange: (p: Parti
   );
 }
 
+function SystemTrayPanel({ cfg, onChange }: { cfg: SystemTrayConfig; onChange: (p: Partial<SystemTrayConfig>) => void }) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className={cfgLabel}>Tray Tooltip</p>
+        <input type="text" value={cfg.tooltip ?? ''} onChange={e => onChange({ tooltip: e.target.value })} placeholder="Leave blank to use App Title" className={cfgInput} />
+      </div>
+      <p className="text-[11px] text-white/25">Show / Hide and Quit items are always included. Additional items can be added via code.</p>
+    </div>
+  );
+}
+
+function RightClickPanel({ cfg, onChange }: { cfg: RightClickConfig; onChange: (p: Partial<RightClickConfig>) => void }) {
+  return (
+    <label className="flex items-start gap-2.5 cursor-pointer">
+      <Toggle checked={cfg.disable !== false} onChange={v => onChange({ disable: v })} />
+      <div>
+        <span className="text-xs font-medium text-white/70">Disable right-click menu</span>
+        <p className="text-[11px] text-white/30 mt-0.5">Off = replace with a minimal Copy / Paste / Select All menu.</p>
+      </div>
+    </label>
+  );
+}
+
+function AutoUpdatePanel({ cfg, onChange }: { cfg: AutoUpdateConfig; onChange: (p: Partial<AutoUpdateConfig>) => void }) {
+  return (
+    <div>
+      <p className={cfgLabel}>Feed URL</p>
+      <input type="url" value={cfg.feedUrl ?? ''} onChange={e => onChange({ feedUrl: e.target.value })} placeholder="https://github.com/your/repo/releases/latest/download" className={cfgInput} />
+      <p className="mt-1 text-[11px] text-white/25">electron-updater generic feed URL. Leave blank to disable auto-updates.</p>
+    </div>
+  );
+}
+
+const KEY_ACTIONS = ['reload', 'goBack', 'goForward', 'toggleDevTools', 'toggleFullscreen', 'minimize', 'maximize'];
+
+function KeyBindingsPanel({ cfg, onChange }: { cfg: KeyBindingsConfig; onChange: (p: Partial<KeyBindingsConfig>) => void }) {
+  const bindings = cfg.bindings ?? [];
+  const update = (idx: number, patch: { accelerator?: string; action?: string }) => {
+    const next = bindings.map((b, i) => i === idx ? { ...b, ...patch } : b);
+    onChange({ bindings: next });
+  };
+  const add = () => onChange({ bindings: [...bindings, { accelerator: '', action: 'reload' }] });
+  const remove = (idx: number) => onChange({ bindings: bindings.filter((_, i) => i !== idx) });
+
+  return (
+    <div className="space-y-2">
+      {bindings.map((b, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <input
+            type="text"
+            value={b.accelerator ?? ''}
+            onChange={e => update(i, { accelerator: e.target.value })}
+            placeholder="Ctrl+R"
+            className={`${cfgInput} flex-1`}
+          />
+          <select
+            value={b.action ?? 'reload'}
+            onChange={e => update(i, { action: e.target.value })}
+            className={`${cfgInput} w-40`}
+          >
+            {KEY_ACTIONS.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <button type="button" onClick={() => remove(i)} className="text-white/30 hover:text-red-400 transition-colors"><X size={13} /></button>
+        </div>
+      ))}
+      <button type="button" onClick={add} className="text-xs text-accent-blue/70 hover:text-accent-blue transition-colors mt-1">+ Add binding</button>
+    </div>
+  );
+}
+
+function WindowPolishPanel({ cfg, onChange }: { cfg: WindowPolishConfig; onChange: (p: Partial<WindowPolishConfig>) => void }) {
+  return (
+    <div className="space-y-3">
+      <label className="flex items-center gap-2.5 cursor-pointer">
+        <Toggle checked={cfg.alwaysOnTop === true} onChange={v => onChange({ alwaysOnTop: v })} />
+        <span className="text-xs font-medium text-white/70">Always on top <span className="text-white/30">(floating above all windows)</span></span>
+      </label>
+      <label className="flex items-center gap-2.5 cursor-pointer">
+        <Toggle checked={cfg.blur === true} onChange={v => onChange({ blur: v })} />
+        <span className="text-xs font-medium text-white/70">Acrylic / vibrancy blur <span className="text-white/30">(Windows 11 + macOS)</span></span>
+      </label>
+      <div>
+        <p className={cfgLabel}>Opacity <span className="normal-case font-normal text-white/30">({Math.round((cfg.opacity ?? 1.0) * 100)}%)</span></p>
+        <input
+          type="range" min="0.3" max="1.0" step="0.05"
+          value={cfg.opacity ?? 1.0}
+          onChange={e => onChange({ opacity: parseFloat(e.target.value) })}
+          className="w-full accent-accent-blue"
+        />
+      </div>
+    </div>
+  );
+}
+
+function ClipboardPanel({ cfg, onChange }: { cfg: ClipboardConfig; onChange: (p: Partial<ClipboardConfig>) => void }) {
+  return (
+    <div className="space-y-3">
+      <label className="flex items-center gap-2.5 cursor-pointer">
+        <Toggle checked={cfg.allowRead !== false} onChange={v => onChange({ allowRead: v })} />
+        <span className="text-xs font-medium text-white/70">Allow clipboard read <span className="text-white/30">(wtdClipboard.read())</span></span>
+      </label>
+      <label className="flex items-center gap-2.5 cursor-pointer">
+        <Toggle checked={cfg.allowWrite !== false} onChange={v => onChange({ allowWrite: v })} />
+        <span className="text-xs font-medium text-white/70">Allow clipboard write <span className="text-white/30">(wtdClipboard.write(text))</span></span>
+      </label>
+    </div>
+  );
+}
+
 function ModuleConfigPanel({
   moduleKey, config, onChange,
 }: {
@@ -238,10 +362,16 @@ function ModuleConfigPanel({
   function patch<T>(key: keyof ModuleConfig, p: Partial<T>) {
     onChange({ ...config, [key]: { ...(config[key] as T), ...p } });
   }
-  if (moduleKey === 'domain-lock') return <DomainLockPanel cfg={config.domainLock ?? {}} onChange={p => patch<DomainLockConfig>('domainLock', p)} />;
-  if (moduleKey === 'title-bar')   return <TitleBarPanel   cfg={config.titleBar   ?? {}} onChange={p => patch<TitleBarConfig>  ('titleBar',   p)} />;
-  if (moduleKey === 'watermark')   return <WatermarkPanel  cfg={config.watermark  ?? {}} onChange={p => patch<WatermarkConfig> ('watermark',  p)} />;
-  if (moduleKey === 'expiry')      return <ExpiryPanel     cfg={config.expiry     ?? {}} onChange={p => patch<ExpiryConfig>    ('expiry',     p)} />;
+  if (moduleKey === 'domain-lock')   return <DomainLockPanel   cfg={config.domainLock   ?? {}} onChange={p => patch<DomainLockConfig>  ('domainLock',   p)} />;
+  if (moduleKey === 'title-bar')     return <TitleBarPanel     cfg={config.titleBar     ?? {}} onChange={p => patch<TitleBarConfig>    ('titleBar',     p)} />;
+  if (moduleKey === 'watermark')     return <WatermarkPanel    cfg={config.watermark    ?? {}} onChange={p => patch<WatermarkConfig>   ('watermark',    p)} />;
+  if (moduleKey === 'expiry')        return <ExpiryPanel       cfg={config.expiry       ?? {}} onChange={p => patch<ExpiryConfig>      ('expiry',       p)} />;
+  if (moduleKey === 'system-tray')   return <SystemTrayPanel   cfg={config.systemTray   ?? {}} onChange={p => patch<SystemTrayConfig>  ('systemTray',   p)} />;
+  if (moduleKey === 'right-click')   return <RightClickPanel   cfg={config.rightClick   ?? {}} onChange={p => patch<RightClickConfig>  ('rightClick',   p)} />;
+  if (moduleKey === 'auto-update')   return <AutoUpdatePanel   cfg={config.autoUpdate   ?? {}} onChange={p => patch<AutoUpdateConfig>  ('autoUpdate',   p)} />;
+  if (moduleKey === 'key-bindings')  return <KeyBindingsPanel  cfg={config.keyBindings  ?? {}} onChange={p => patch<KeyBindingsConfig> ('keyBindings',  p)} />;
+  if (moduleKey === 'window-polish') return <WindowPolishPanel cfg={config.windowPolish ?? {}} onChange={p => patch<WindowPolishConfig>('windowPolish',  p)} />;
+  if (moduleKey === 'clipboard')     return <ClipboardPanel    cfg={config.clipboard    ?? {}} onChange={p => patch<ClipboardConfig>   ('clipboard',    p)} />;
   return null;
 }
 
@@ -480,6 +610,28 @@ function moduleConfigSummary(key: string, mc: ModuleConfig): string | null {
     return ex.expiresAt
       ? `expires ${new Date(ex.expiresAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}`
       : 'no expiry set';
+  }
+  if (key === 'system-tray')   return mc.systemTray?.tooltip ? `tooltip: "${mc.systemTray.tooltip}"` : 'default tooltip';
+  if (key === 'right-click')   return mc.rightClick?.disable !== false ? 'disabled' : 'minimal native menu';
+  if (key === 'auto-update')   return mc.autoUpdate?.feedUrl ? mc.autoUpdate.feedUrl : 'no feed URL';
+  if (key === 'key-bindings') {
+    const n = mc.keyBindings?.bindings?.length ?? 0;
+    return n > 0 ? `${n} binding${n !== 1 ? 's' : ''} configured` : 'no bindings';
+  }
+  if (key === 'window-polish') {
+    const wp = mc.windowPolish ?? {};
+    const parts: string[] = [];
+    if (wp.alwaysOnTop) parts.push('always-on-top');
+    if (wp.blur) parts.push('blur');
+    if (wp.opacity !== undefined && wp.opacity < 1) parts.push(`${Math.round(wp.opacity * 100)}% opacity`);
+    return parts.length > 0 ? parts.join(' · ') : 'no effects';
+  }
+  if (key === 'clipboard') {
+    const cp = mc.clipboard ?? {};
+    const perms: string[] = [];
+    if (cp.allowRead !== false)  perms.push('read');
+    if (cp.allowWrite !== false) perms.push('write');
+    return perms.length > 0 ? perms.join(' + ') : 'none';
   }
   return null;
 }

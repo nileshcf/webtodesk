@@ -83,11 +83,45 @@ export interface ExpiryConfig {
   upgradeUrl?: string;
 }
 
+export interface SystemTrayConfig {
+  tooltip?: string;
+  items?: Array<{ label?: string; action?: string; type?: string }>;
+}
+
+export interface RightClickConfig {
+  disable?: boolean;
+}
+
+export interface AutoUpdateConfig {
+  feedUrl?: string;
+}
+
+export interface KeyBindingsConfig {
+  bindings?: Array<{ accelerator?: string; action?: string }>;
+}
+
+export interface WindowPolishConfig {
+  blur?: boolean;
+  alwaysOnTop?: boolean;
+  opacity?: number;
+}
+
+export interface ClipboardConfig {
+  allowRead?: boolean;
+  allowWrite?: boolean;
+}
+
 export interface ModuleConfig {
   domainLock?: DomainLockConfig;
   titleBar?: TitleBarConfig;
   watermark?: WatermarkConfig;
   expiry?: ExpiryConfig;
+  systemTray?: SystemTrayConfig;
+  rightClick?: RightClickConfig;
+  autoUpdate?: AutoUpdateConfig;
+  keyBindings?: KeyBindingsConfig;
+  windowPolish?: WindowPolishConfig;
+  clipboard?: ClipboardConfig;
 }
 
 export interface CreateConversionRequest {
