@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import { authApi, getAccessToken } from '../services/api';
 import type { UpdateProfileRequest, User } from '../types';
+import { signInWithPopup } from 'firebase/auth';
+import { auth, googleProvider } from '../config/firebase';
 
 interface AuthContextType {
   user: User | null;
@@ -8,6 +10,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (username: string, email: string, password: string, phoneNumber: number) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
   updateProfile: (data: UpdateProfileRequest) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -41,6 +44,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await authApi.register({ username, email, password, phoneNumber });
   };
 
+  const loginWithGoogle = async () => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const idToken = await result.user.getIdToken(true);
+      await authApi.googleAuth({ idToken });
+      const profile = await authApi.getProfile();
+      setUser(profile);
+    } catch (error: any) {
+      if (error.code === 'auth/popup-closed-by-user') return;
+      if (error.code === 'auth/account-exists-with-different-credential') {
+        throw new Error('An account with this email exists. Please log in with your password.');
+      }
+      throw new Error('Google sign-in failed. Please try again.');
+    }
+  };
+
   const updateProfile = async (data: UpdateProfileRequest) => {
     await authApi.updateProfile(data);
     const profile = await authApi.getProfile();
@@ -53,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, register, updateProfile, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, register, loginWithGoogle, updateProfile, logout }}>
       {children}
     </AuthContext.Provider>
   );
