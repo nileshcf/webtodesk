@@ -14,6 +14,7 @@ import com.example.conversion_service.service.BuildQueueService;
 import com.example.conversion_service.service.BuildService;
 import com.example.conversion_service.service.ConversionService;
 import com.example.conversion_service.service.ModuleRegistry;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,6 +32,7 @@ import java.util.Map;
  *
  * These endpoints supplement the legacy /conversions/{id}/build/* endpoints in ConversionController.
  */
+@Tag(name = "Build", description = "Build queue management, metrics, history, module availability, and SSE progress streaming")
 @Slf4j
 @RestController
 @RequestMapping("/build")
