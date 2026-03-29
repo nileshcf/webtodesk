@@ -1,0 +1,83 @@
+// Module: domain-lock — Tier: TRIAL
+// Restricts navigation to allowed domains and blocks specified destinations.
+// Config (from config.domainLock):
+//   allowedDomains  — string[]. Empty = allow all except blockedDomains.
+//                     When non-empty, ONLY these hostnames (and their subdomains) are allowed.
+//   blockedDomains  — string[]. Always denied, even if in allowedDomains.
+//   blockMessage    — string.  Alert text shown when navigation is blocked.
+//   allowExternalInBrowser — bool. Open blocked URLs in system browser instead of dropping them.
+
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('domain-lock')) return;
+
+  const { shell } = require('electron');
+  const {
+    allowedDomains = [],
+    blockedDomains = [],
+    blockMessage = 'Navigation to this destination is not allowed.',
+    allowExternalInBrowser = false
+  } = config.domainLock || {};
+
+  // Derive base hostname from the app's websiteUrl as the implicit allowed host.
+  const baseHostname = (() => {
+    try { return new URL(config.websiteUrl).hostname; } catch (_) { return ''; }
+  })();
+
+  /**
+   * Returns true if navigation to `url` should be blocked.
+   * Rules (applied in order):
+   *   1. Always block if hostname matches any entry in blockedDomains.
+   *   2. If allowedDomains is non-empty, block unless hostname matches an entry.
+   *   3. If allowedDomains is empty, block anything outside the base hostname.
+   */
+  function isBlocked(url) {
+    let hostname;
+    try { hostname = new URL(url).hostname; } catch (_) { return false; }
+
+    const matches = (list, h) =>
+      list.some(d => h === d || h.endsWith('.' + d));
+
+    if (matches(blockedDomains, hostname)) return true;
+
+    if (allowedDomains.length > 0) {
+      return !matches(allowedDomains, hostname);
+    }
+
+    // Default: allow only the base hostname (and its subdomains)
+    if (!baseHostname) return false;
+    return hostname !== baseHostname && !hostname.endsWith('.' + baseHostname);
+  }
+
+  function handleBlocked(url) {
+    if (allowExternalInBrowser) {
+      shell.openExternal(url).catch(() => {});
+    } else {
+      mainWindow.webContents
+        .executeJavaScript(`window.alert(${JSON.stringify(blockMessage)});`)
+        .catch(() => {});
+    }
+  }
+
+  // Block same-window navigation
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (isBlocked(url)) {
+      event.preventDefault();
+      handleBlocked(url);
+    }
+  });
+
+  // Block new-window / target="_blank" navigation
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isBlocked(url)) {
+      handleBlocked(url);
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
+  });
+}
+
+function preloadSetup() {}
+
+function teardown() {}
+
+module.exports = { setup, preloadSetup, teardown };

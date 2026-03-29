@@ -5,6 +5,8 @@ function setup(mainWindow, config) {
   mainWindow.setContentProtection(true);
 }
 
+function preloadSetup() {}
+
 function teardown() {}
 
-module.exports = { setup, teardown };
+module.exports = { setup, preloadSetup, teardown };

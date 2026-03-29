@@ -1,5 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
-
+const config = require('./config');
+{{{preloadModuleRequires}}}
 contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: url => ipcRenderer.send('open-external', url)
 });
@@ -80,3 +81,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ipcRenderer.on('trigger-protection', triggerProtection);
 })();
 {{/hasScreenProtect}}
+{{{preloadModuleSetups}}}

@@ -13,6 +13,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.example.conversion_service.dto.ModuleConfig;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -56,6 +59,8 @@ public class ConversionService {
                 .enabledModules(request.enabledModules())
 
                 .targetPlatform(request.targetPlatform())
+
+                .moduleConfig(request.moduleConfig())
 
                 .build();
 
@@ -113,6 +118,8 @@ public class ConversionService {
 
         if (request.targetPlatform() != null) project.setTargetPlatform(request.targetPlatform());
 
+        if (request.moduleConfig() != null) project.setModuleConfig(request.moduleConfig());
+
 
 
         return ConversionResponse.from(repository.save(project));
@@ -168,13 +175,19 @@ public class ConversionService {
         LicenseTier tier = project.getTier() != null ? project.getTier() : LicenseTier.TRIAL;
         List<String> resolved = moduleRegistry.resolveEnabledModules(project.getEnabledModules(), tier);
 
-        StringBuilder requires = new StringBuilder();
-        StringBuilder setups   = new StringBuilder();
+        StringBuilder requires       = new StringBuilder();
+        StringBuilder setups         = new StringBuilder();
+        StringBuilder preloadReqs    = new StringBuilder();
+        StringBuilder preloadSetups  = new StringBuilder();
         for (String key : resolved) {
             String varName = key.replace('-', '_');
             requires.append("const ").append(varName)
                     .append(" = require('./modules/").append(key).append("');\n");
             setups.append("  ").append(varName).append(".setup(mainWindow, config);\n");
+            preloadReqs.append("const ").append(varName)
+                    .append(" = require('./modules/").append(key).append("');\n");
+            preloadSetups.append("  ").append(varName)
+                    .append(".preloadSetup(contextBridge, ipcRenderer, config);\n");
         }
 
         String modulesJson = resolved.isEmpty() ? "[]"
@@ -198,10 +211,13 @@ public class ConversionService {
         ctx.put("hasScreenProtect", resolved.contains("screen-protect"));
         ctx.put("moduleRequires",  requires.toString());
         ctx.put("moduleSetups",    setups.toString());
+        ctx.put("preloadModuleRequires", preloadReqs.toString());
+        ctx.put("preloadModuleSetups",   preloadSetups.toString());
         ctx.put("isWin",   isWin);
         ctx.put("isLinux", isLinux);
         ctx.put("isMac",   isMac);
         ctx.put("linuxTarget", linuxTarget);
+        applyModuleConfigContext(ctx, resolved, project.getModuleConfig());
 
         Map<String, String> files = new LinkedHashMap<>();
         files.put("config.js",    templateEngine.render("config.mustache",  ctx));
@@ -215,6 +231,54 @@ public class ConversionService {
                             templateEngine.render(def.templateFile(), Map.of())));
         }
         return files;
+    }
+
+    private static void applyModuleConfigContext(Map<String, Object> ctx, List<String> resolved, ModuleConfig mc) {
+        boolean hasDomainLock = resolved.contains("domain-lock");
+        ctx.put("hasDomainLock", hasDomainLock);
+        if (hasDomainLock) {
+            ModuleConfig.DomainLockConfig dlc = (mc != null && mc.getDomainLock() != null)
+                    ? mc.getDomainLock() : new ModuleConfig.DomainLockConfig();
+            ctx.put("domainLockConfigJson", toJson(dlc));
+        }
+
+        boolean hasTitleBar = resolved.contains("title-bar");
+        ctx.put("hasTitleBar", hasTitleBar);
+        if (hasTitleBar) {
+            ModuleConfig.TitleBarConfig tbc = (mc != null && mc.getTitleBar() != null)
+                    ? mc.getTitleBar() : new ModuleConfig.TitleBarConfig();
+            ctx.put("titleBarConfigJson", toJson(tbc));
+        }
+
+        boolean hasWatermark = resolved.contains("watermark");
+        ctx.put("hasWatermark", hasWatermark);
+        if (hasWatermark) {
+            ModuleConfig.WatermarkConfig wmc = (mc != null && mc.getWatermark() != null)
+                    ? mc.getWatermark() : new ModuleConfig.WatermarkConfig();
+            if (wmc.getExpiresAt() == null && mc != null && mc.getExpiry() != null) {
+                wmc.setExpiresAt(mc.getExpiry().getExpiresAt());
+            }
+            ctx.put("watermarkConfigJson", toJson(wmc));
+        }
+
+        boolean hasExpiry = resolved.contains("expiry");
+        ctx.put("hasExpiry", hasExpiry);
+        if (hasExpiry) {
+            ModuleConfig.ExpiryConfig ec = (mc != null && mc.getExpiry() != null)
+                    ? mc.getExpiry() : new ModuleConfig.ExpiryConfig();
+            ctx.put("expiryConfigJson", toJson(ec));
+        }
+    }
+
+    private static String toJson(Object obj) {
+        try {
+            return new ObjectMapper()
+                    .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
+                    .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                    .writeValueAsString(obj);
+        } catch (Exception e) {
+            return "{}";
+        }
     }
 
     private static String sanitizeNpmPackageName(String name) {

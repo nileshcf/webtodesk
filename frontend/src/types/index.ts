@@ -41,6 +41,7 @@ export interface ConversionProject {
   updatedAt: string;
   enabledModules?: string[];
   targetPlatform?: string;
+  moduleConfig?: ModuleConfig;
 }
 
 export interface BuildStatusResponse {
@@ -53,6 +54,42 @@ export interface BuildStatusResponse {
   updatedAt: string | null;
 }
 
+export interface DomainLockConfig {
+  allowedDomains?: string[];
+  blockedDomains?: string[];
+  blockMessage?: string;
+  allowExternalInBrowser?: boolean;
+}
+
+export interface TitleBarConfig {
+  text?: string;
+  overlayColor?: string;
+  symbolColor?: string;
+  overlayHeight?: number;
+}
+
+export interface WatermarkConfig {
+  text?: string;
+  position?: string;
+  showDaysRemaining?: boolean;
+  badgeColor?: string;
+  textColor?: string;
+  opacity?: number;
+}
+
+export interface ExpiryConfig {
+  expiresAt?: string;
+  lockMessage?: string;
+  upgradeUrl?: string;
+}
+
+export interface ModuleConfig {
+  domainLock?: DomainLockConfig;
+  titleBar?: TitleBarConfig;
+  watermark?: WatermarkConfig;
+  expiry?: ExpiryConfig;
+}
+
 export interface CreateConversionRequest {
   projectName: string;
   websiteUrl: string;
@@ -60,6 +97,7 @@ export interface CreateConversionRequest {
   iconFile?: string;
   enabledModules?: string[];
   targetPlatform?: string;
+  moduleConfig?: ModuleConfig;
 }
 
 export interface ElectronConfig {

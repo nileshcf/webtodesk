@@ -4,6 +4,9 @@ param(
     [string]$HubRepo,
     [string]$GitHubRepo,
     [string]$Registry = "ghcr.io",
+    [string]$EnvFile = ".env",
+    [string]$PatEnvVarName = "PAT_DOCKER_GIT",
+    [string]$RegistryUsername,
     [string]$SourceImage = "webtodesk:latest",
     [string]$Tag = "latest",
     [string[]]$ExtraTags = @(),
@@ -74,6 +77,59 @@ function Resolve-RegistryHost {
     return "docker.io"
 }
 
+function Get-EnvValueFromDotEnv {
+    param(
+        [string]$FilePath,
+        [string]$Key
+    )
+
+    if (-not (Test-Path $FilePath) -or -not $Key) {
+        return $null
+    }
+
+    foreach ($line in (Get-Content -Path $FilePath -ErrorAction SilentlyContinue)) {
+        if (-not $line) { continue }
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
+
+        if ($trimmed -match "^([A-Za-z_][A-Za-z0-9_]*)=(.*)$") {
+            $name = $Matches[1]
+            $value = $Matches[2]
+            if ($name -eq $Key) {
+                $clean = $value.Trim()
+                if (($clean.StartsWith('"') -and $clean.EndsWith('"')) -or ($clean.StartsWith("'") -and $clean.EndsWith("'"))) {
+                    $clean = $clean.Substring(1, $clean.Length - 2)
+                }
+                return $clean
+            }
+        }
+    }
+
+    return $null
+}
+
+function Resolve-RegistryUsername {
+    param(
+        [string]$Repo,
+        [string]$RegistryHost,
+        [string]$ExplicitUsername
+    )
+
+    if ($ExplicitUsername) {
+        return $ExplicitUsername.Trim()
+    }
+
+    if ($env:GITHUB_USERNAME) {
+        return $env:GITHUB_USERNAME.Trim()
+    }
+
+    if ($RegistryHost -eq "ghcr.io" -and $Repo -match "^ghcr\.io/([^/]+)/") {
+        return $Matches[1]
+    }
+
+    return $null
+}
+
 $result = [ordered]@{
     script = "registry-push.ps1"
     sourceImage = $SourceImage
@@ -83,6 +139,7 @@ $result = [ordered]@{
     buildFirst = [bool]$BuildFirst
     success = $false
     pushedImages = @()
+    loginMode = $null
 }
 
 try {
@@ -131,9 +188,34 @@ try {
         if (-not (Confirm-Action "Run docker login for '$registryHost' now?")) {
             throw "docker login canceled"
         }
-        & docker login $registryHost
-        if ($LASTEXITCODE -ne 0) {
-            throw "docker login failed"
+
+        $token = [Environment]::GetEnvironmentVariable($PatEnvVarName)
+        if (-not $token) {
+            $envPath = Join-Path $PSScriptRoot $EnvFile
+            $token = Get-EnvValueFromDotEnv -FilePath $envPath -Key $PatEnvVarName
+        }
+
+        $loginUser = Resolve-RegistryUsername -Repo $targetRepo -RegistryHost $registryHost -ExplicitUsername $RegistryUsername
+
+        if ($token -and $loginUser) {
+            Write-Info "Using token from '$PatEnvVarName' for registry login"
+            $token | docker login $registryHost -u $loginUser --password-stdin
+            if ($LASTEXITCODE -ne 0) {
+                throw "docker login failed using token from '$PatEnvVarName'"
+            }
+            $result.loginMode = "token:$PatEnvVarName"
+        } else {
+            if (-not $token) {
+                Write-Info "No '$PatEnvVarName' found in process env or '$EnvFile'; using interactive login"
+            } elseif (-not $loginUser) {
+                Write-Info "Could not infer registry username; using interactive login"
+            }
+
+            & docker login $registryHost
+            if ($LASTEXITCODE -ne 0) {
+                throw "docker login failed"
+            }
+            $result.loginMode = "interactive"
         }
         Write-Ok "docker login completed for '$registryHost'"
     }

@@ -822,13 +822,19 @@ public class BuildService {
         LicenseTier tier = project.getTier() != null ? project.getTier() : LicenseTier.TRIAL;
         List<String> resolved = moduleRegistry.resolveEnabledModules(project.getEnabledModules(), tier, developmentBuild);
 
-        StringBuilder requires = new StringBuilder();
-        StringBuilder setups = new StringBuilder();
+        StringBuilder requires      = new StringBuilder();
+        StringBuilder setups        = new StringBuilder();
+        StringBuilder preloadReqs   = new StringBuilder();
+        StringBuilder preloadSetups = new StringBuilder();
         for (String key : resolved) {
             String varName = key.replace('-', '_');
             requires.append("const ").append(varName)
                     .append(" = require('./modules/").append(key).append("');\n");
             setups.append("  ").append(varName).append(".setup(mainWindow, config);\n");
+            preloadReqs.append("const ").append(varName)
+                    .append(" = require('./modules/").append(key).append("');\n");
+            preloadSetups.append("  ").append(varName)
+                    .append(".preloadSetup(contextBridge, ipcRenderer, config);\n");
         }
 
         String modulesJson = resolved.isEmpty() ? "[]"
@@ -847,6 +853,9 @@ public class BuildService {
         ctx.put("hasScreenProtect", resolved.contains("screen-protect"));
         ctx.put("moduleRequires",  requires.toString());
         ctx.put("moduleSetups",    setups.toString());
+        ctx.put("preloadModuleRequires", preloadReqs.toString());
+        ctx.put("preloadModuleSetups",   preloadSetups.toString());
+        applyModuleConfigContext(ctx, resolved, project.getModuleConfig());
 
         // Build-target context — drives platform-specific section in package.mustache
         BuildTarget target = resolveBuildTarget(project);
@@ -870,6 +879,63 @@ public class BuildService {
         log.debug("Generated {} files ({} modules) for project '{}'",
                 files.size(), resolved.size(), project.getProjectName());
         return files;
+    }
+
+    private static void applyModuleConfigContext(Map<String, Object> ctx, List<String> resolved,
+                                                  com.example.conversion_service.dto.ModuleConfig mc) {
+        boolean hasDomainLock = resolved.contains("domain-lock");
+        ctx.put("hasDomainLock", hasDomainLock);
+        if (hasDomainLock) {
+            com.example.conversion_service.dto.ModuleConfig.DomainLockConfig dlc =
+                    (mc != null && mc.getDomainLock() != null)
+                    ? mc.getDomainLock()
+                    : new com.example.conversion_service.dto.ModuleConfig.DomainLockConfig();
+            ctx.put("domainLockConfigJson", toJson(dlc));
+        }
+
+        boolean hasTitleBar = resolved.contains("title-bar");
+        ctx.put("hasTitleBar", hasTitleBar);
+        if (hasTitleBar) {
+            com.example.conversion_service.dto.ModuleConfig.TitleBarConfig tbc =
+                    (mc != null && mc.getTitleBar() != null)
+                    ? mc.getTitleBar()
+                    : new com.example.conversion_service.dto.ModuleConfig.TitleBarConfig();
+            ctx.put("titleBarConfigJson", toJson(tbc));
+        }
+
+        boolean hasWatermark = resolved.contains("watermark");
+        ctx.put("hasWatermark", hasWatermark);
+        if (hasWatermark) {
+            com.example.conversion_service.dto.ModuleConfig.WatermarkConfig wmc =
+                    (mc != null && mc.getWatermark() != null)
+                    ? mc.getWatermark()
+                    : new com.example.conversion_service.dto.ModuleConfig.WatermarkConfig();
+            if (wmc.getExpiresAt() == null && mc != null && mc.getExpiry() != null) {
+                wmc.setExpiresAt(mc.getExpiry().getExpiresAt());
+            }
+            ctx.put("watermarkConfigJson", toJson(wmc));
+        }
+
+        boolean hasExpiry = resolved.contains("expiry");
+        ctx.put("hasExpiry", hasExpiry);
+        if (hasExpiry) {
+            com.example.conversion_service.dto.ModuleConfig.ExpiryConfig ec =
+                    (mc != null && mc.getExpiry() != null)
+                    ? mc.getExpiry()
+                    : new com.example.conversion_service.dto.ModuleConfig.ExpiryConfig();
+            ctx.put("expiryConfigJson", toJson(ec));
+        }
+    }
+
+    private static String toJson(Object obj) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper()
+                    .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
+                    .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                    .writeValueAsString(obj);
+        } catch (Exception e) {
+            return "{}";
+        }
     }
 
     private static Integer parseMajorVersion(String version) {

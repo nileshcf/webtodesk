@@ -26,5 +26,7 @@ public record CreateConversionRequest(
 
         List<String> enabledModules,
 
-        String targetPlatform
+        String targetPlatform,
+
+        ModuleConfig moduleConfig
 ) {}

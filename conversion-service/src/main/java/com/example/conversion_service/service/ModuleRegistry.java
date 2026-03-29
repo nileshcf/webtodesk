@@ -39,6 +39,22 @@ public class ModuleRegistry {
                 "badge", "Badge Count",
                 "Set dock/taskbar badge counter via IPC from the renderer",
                 LicenseTier.TRIAL, "modules/badge.mustache"));
+        m.put("domain-lock", new ModuleDefinition(
+                "domain-lock", "Domain Lock",
+                "Restrict navigation to allowed domains and block specified destinations",
+                LicenseTier.TRIAL, "modules/domain-lock.mustache"));
+        m.put("title-bar", new ModuleDefinition(
+                "title-bar", "Title Bar",
+                "Set a custom window title that persists across page navigations",
+                LicenseTier.TRIAL, "modules/title-bar.mustache"));
+        m.put("watermark", new ModuleDefinition(
+                "watermark", "Watermark Badge",
+                "Persistent badge near window controls showing trial status and days remaining",
+                LicenseTier.TRIAL, "modules/watermark.mustache"));
+        m.put("expiry", new ModuleDefinition(
+                "expiry", "Trial Expiry",
+                "Locks the app with a full-screen overlay after a specified expiry timestamp",
+                LicenseTier.TRIAL, "modules/expiry.mustache"));
         m.put("screen-protect", new ModuleDefinition(
                 "screen-protect", "Screen Protection",
                 "OS-level content protection to prevent screenshots and recordings",

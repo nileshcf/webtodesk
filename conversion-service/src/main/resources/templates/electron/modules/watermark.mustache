@@ -1,0 +1,118 @@
+// Module: watermark — Tier: TRIAL / PRO
+// Injects a persistent badge near the native window control buttons.
+// TRIAL: shows "Powered by WebToDesk · N days left" (orange brand).
+// PRO  : shows custom text at a custom position with custom colours.
+//
+// Config (from config.watermark):
+//   text              — string | null.  Null → "Powered by WebToDesk".
+//   position          — "top-left" | "top-right" | "bottom-left" | "bottom-right".
+//                       Default: "top-right" (clears native controls on Win/Linux).
+//   showDaysRemaining — bool.   Append " · N days left" when expiresAt is set.
+//   expiresAt         — ISO-8601 string | null.  Populated by service from ExpiryConfig.
+//   badgeColor        — CSS colour string.  Default: orange brand.
+//   textColor         — CSS colour string.  Default: white.
+//   opacity           — number 0–1.         Default: 1.0.
+//
+// Works on Windows, macOS, Linux (pure CSS + DOM, no platform APIs needed).
+
+var BADGE_ID = '__wtd-watermark';
+
+function setup() {}
+
+function preloadSetup(contextBridge, ipcRenderer, config) {
+  if (!config.modules || config.modules.indexOf('watermark') === -1) return;
+
+  var wm = config.watermark || {};
+  var text              = wm.text              || 'Powered by WebToDesk';
+  var position          = wm.position          || 'top-right';
+  var showDaysRemaining = wm.showDaysRemaining !== false;
+  var expiresAt         = wm.expiresAt         || null;
+  var badgeColor        = wm.badgeColor        || 'rgba(234,88,12,0.92)';
+  var textColor         = wm.textColor         || '#ffffff';
+  var opacity           = typeof wm.opacity === 'number' ? wm.opacity : 1.0;
+
+  // ── Days-remaining label ──────────────────────────────────────────────────
+  if (showDaysRemaining && expiresAt) {
+    try {
+      var ms   = new Date(expiresAt).getTime() - Date.now();
+      var days = Math.max(0, Math.ceil(ms / 86400000));
+      text += ' \u00b7 ' + days + (days === 1 ? ' day left' : ' days left');
+    } catch (_) {}
+  }
+
+  // ── Position map (right-side offset clears native window controls) ────────
+  var positionStyles = {
+    'top-left'    : 'top:8px;left:8px;',
+    'top-right'   : 'top:8px;right:120px;',   // 120 px clears Win/Linux controls
+    'bottom-left' : 'bottom:8px;left:8px;',
+    'bottom-right': 'bottom:8px;right:8px;'
+  };
+  var posStyle = positionStyles[position] || positionStyles['top-right'];
+
+  // ── Badge CSS ─────────────────────────────────────────────────────────────
+  var css = [
+    'position:fixed',
+    posStyle,
+    'background:' + badgeColor,
+    'color:' + textColor,
+    'padding:2px 10px',
+    'border-radius:12px',
+    'font-size:11px',
+    'font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+    'font-weight:500',
+    'letter-spacing:0.2px',
+    'line-height:20px',
+    'pointer-events:none',
+    'opacity:' + opacity,
+    'z-index:2147483647',
+    'white-space:nowrap',
+    'user-select:none',
+    '-webkit-user-select:none',
+    'box-shadow:0 1px 4px rgba(0,0,0,0.20)'
+  ].join(';');
+
+  // ── Injection ─────────────────────────────────────────────────────────────
+  function injectBadge() {
+    // Idempotent — skip if already present
+    if (document.getElementById(BADGE_ID)) return;
+
+    var badge       = document.createElement('div');
+    badge.id        = BADGE_ID;
+    badge.style.cssText = css;
+    badge.textContent   = text;
+
+    var root = document.body || document.documentElement;
+    if (root) root.appendChild(badge);
+  }
+
+  // Inject as soon as the DOM is ready
+  if (document.body) {
+    injectBadge();
+  } else {
+    window.addEventListener('DOMContentLoaded', injectBadge);
+  }
+
+  // Re-inject after SPA navigations that replace DOM body
+  var _push    = history.pushState;
+  var _replace = history.replaceState;
+  history.pushState = function() {
+    _push.apply(this, arguments);
+    setTimeout(injectBadge, 150);
+  };
+  history.replaceState = function() {
+    _replace.apply(this, arguments);
+    setTimeout(injectBadge, 150);
+  };
+  window.addEventListener('popstate', function() {
+    setTimeout(injectBadge, 150);
+  });
+}
+
+function teardown() {
+  try {
+    var el = document.getElementById(BADGE_ID);
+    if (el) el.remove();
+  } catch (_) {}
+}
+
+module.exports = { setup, preloadSetup, teardown };

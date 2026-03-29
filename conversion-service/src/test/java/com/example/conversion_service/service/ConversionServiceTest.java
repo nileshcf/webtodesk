@@ -65,7 +65,7 @@ class ConversionServiceTest {
 
     @Test
     void create_shouldSaveAndReturnResponse() {
-        var request = new CreateConversionRequest("My Test App", "https://example.com", "My Test App", null, null, null);
+        var request = new CreateConversionRequest("My Test App", "https://example.com", "My Test App", null, null, null, null);
         when(repository.save(any(ConversionProject.class))).thenReturn(sampleProject);
 
         ConversionResponse response = conversionService.create(request, "user@example.com");
@@ -78,7 +78,7 @@ class ConversionServiceTest {
 
     @Test
     void create_shouldSanitizeProjectName() {
-        var request = new CreateConversionRequest("My Cool App!", "https://example.com", "Cool App", null, null, null);
+        var request = new CreateConversionRequest("My Cool App!", "https://example.com", "Cool App", null, null, null, null);
         when(repository.save(any(ConversionProject.class))).thenAnswer(inv -> {
             ConversionProject saved = inv.getArgument(0);
             saved.setId("proj-456");
@@ -92,7 +92,7 @@ class ConversionServiceTest {
 
     @Test
     void create_shouldDefaultIconFile() {
-        var request = new CreateConversionRequest("Test", "https://example.com", "Test", null, null, null);
+        var request = new CreateConversionRequest("Test", "https://example.com", "Test", null, null, null, null);
         when(repository.save(any(ConversionProject.class))).thenAnswer(inv -> inv.getArgument(0));
 
         conversionService.create(request, "user@example.com");
@@ -145,7 +145,7 @@ class ConversionServiceTest {
         when(repository.findById("proj-123")).thenReturn(Optional.of(sampleProject));
         when(repository.save(any(ConversionProject.class))).thenReturn(sampleProject);
 
-        var request = new UpdateConversionRequest(null, "https://new-url.com", "New Title", null, "2.0.0", null, null);
+        var request = new UpdateConversionRequest(null, "https://new-url.com", "New Title", null, "2.0.0", null, null, null);
         conversionService.update("proj-123", request);
 
         verify(repository).save(argThat(project ->
@@ -159,7 +159,7 @@ class ConversionServiceTest {
     void update_shouldThrowWhenNotFound() {
         when(repository.findById("nonexistent")).thenReturn(Optional.empty());
 
-        var request = new UpdateConversionRequest("name", null, null, null, null, null, null);
+        var request = new UpdateConversionRequest("name", null, null, null, null, null, null, null);
 
         assertThatThrownBy(() -> conversionService.update("nonexistent", request))
                 .isInstanceOf(ProjectNotFoundException.class);

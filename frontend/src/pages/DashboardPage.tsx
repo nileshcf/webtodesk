@@ -8,7 +8,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { conversionApi } from '../services/api';
 import type { ConversionProject, ElectronConfig } from '../types';
-import ProjectWizard from '../components/ProjectWizard';
+import ProjectWizard, { type WizardData } from '../components/ProjectWizard';
 import BuildDashboard from '../components/BuildDashboard';
 
 export default function DashboardPage() {
@@ -41,13 +41,11 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
 
-  const handleWizardSubmit = async (wizardData: {
-    projectName: string; websiteUrl: string; appTitle: string;
-    iconFile: string; enabledModules: string[]; targetPlatform: string;
-  }) => {
+  const handleWizardSubmit = async (wizardData: WizardData) => {
     setFormError('');
     setFormLoading(true);
     try {
+      const mc = wizardData.moduleConfig;
       const created = await conversionApi.create({
         projectName: wizardData.projectName,
         websiteUrl: wizardData.websiteUrl,
@@ -55,6 +53,7 @@ export default function DashboardPage() {
         iconFile: wizardData.iconFile || undefined,
         enabledModules: wizardData.enabledModules.length > 0 ? wizardData.enabledModules : undefined,
         targetPlatform: wizardData.targetPlatform || undefined,
+        moduleConfig: mc && Object.keys(mc).length > 0 ? mc : undefined,
       });
       setShowForm(false);
       setProjects(prev => [created, ...prev]);
@@ -66,14 +65,12 @@ export default function DashboardPage() {
     }
   };
 
-  const handleUpdateSubmit = async (wizardData: {
-    projectName: string; websiteUrl: string; appTitle: string;
-    iconFile: string; enabledModules: string[]; targetPlatform: string;
-  }) => {
+  const handleUpdateSubmit = async (wizardData: WizardData) => {
     if (!editingProject) return;
     setFormError('');
     setFormLoading(true);
     try {
+      const mc = wizardData.moduleConfig;
       const updated = await conversionApi.update(editingProject.id, {
         projectName: wizardData.projectName,
         websiteUrl: wizardData.websiteUrl,
@@ -81,6 +78,7 @@ export default function DashboardPage() {
         iconFile: wizardData.iconFile || undefined,
         enabledModules: wizardData.enabledModules.length > 0 ? wizardData.enabledModules : undefined,
         targetPlatform: wizardData.targetPlatform || undefined,
+        moduleConfig: mc && Object.keys(mc).length > 0 ? mc : undefined,
       });
       setEditingProject(null);
       fetchProjects();
@@ -349,6 +347,7 @@ export default function DashboardPage() {
                         iconFile: editingProject.iconFile || '',
                         enabledModules: editingProject.enabledModules || [],
                         targetPlatform: (editingProject.targetPlatform as any) || 'auto',
+                        moduleConfig: editingProject.moduleConfig ?? {},
                       } : undefined}
                       onSubmit={editingProject ? handleUpdateSubmit : handleWizardSubmit}
                       onCancel={() => { setShowForm(false); setEditingProject(null); setFormError(''); }}

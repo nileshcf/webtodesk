@@ -86,11 +86,41 @@ param(
     [int]   $PollIntervalSec = 8,
     [switch]$Direct,
     [switch]$AutoRegister,
-    [switch]$ListModules
+    [switch]$ListModules,
+
+    # Named test scenarios — apply a preset before any other params are evaluated.
+    # Available: domain-lock, all-trial, all-modules
+    [ValidateSet("", "domain-lock", "all-trial", "all-modules")]
+    [string]$Scenario        = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+# ─── Scenario presets ─────────────────────────────────────────────────────────
+
+if ($Scenario -ne "") {
+    switch ($Scenario) {
+        "domain-lock" {
+            # Test domain-lock: allow only example.com, block ads.example.com
+            if (-not $PSBoundParameters.ContainsKey('Modules'))     { $Modules     = "domain-lock,splash-screen,offline" }
+            if (-not $PSBoundParameters.ContainsKey('WebsiteUrl'))  { $WebsiteUrl  = "https://example.com" }
+            if (-not $PSBoundParameters.ContainsKey('AppTitle'))    { $AppTitle    = "Domain Lock Test" }
+            if (-not $PSBoundParameters.ContainsKey('ProjectName')) { $ProjectName = "domain-lock-test-$(Get-Date -Format 'HHmmss')" }
+        }
+        "all-trial" {
+            # All TRIAL-tier modules together
+            if (-not $PSBoundParameters.ContainsKey('Modules'))     { $Modules     = "splash-screen,offline,badge,domain-lock,title-bar,watermark,expiry" }
+            if (-not $PSBoundParameters.ContainsKey('ProjectName')) { $ProjectName = "all-trial-test-$(Get-Date -Format 'HHmmss')" }
+        }
+        "all-modules" {
+            # All modules including PRO (requires DEVELOPMENT_BUILD=true for tier bypass)
+            if (-not $PSBoundParameters.ContainsKey('Modules'))     { $Modules     = "splash-screen,offline,badge,domain-lock,title-bar,watermark,expiry,screen-protect,deep-link" }
+            if (-not $PSBoundParameters.ContainsKey('ProjectName')) { $ProjectName = "all-modules-test-$(Get-Date -Format 'HHmmss')" }
+        }
+    }
+    Write-Host "  [Scenario: $Scenario]" -ForegroundColor DarkCyan
+}
 
 # ─── Colour helpers ──────────────────────────────────────────────────────────
 

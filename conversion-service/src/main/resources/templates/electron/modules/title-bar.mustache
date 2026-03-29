@@ -1,0 +1,65 @@
+// Module: title-bar — Tier: TRIAL
+// Enforces a custom window title that survives page navigations and dynamic
+// <title> updates. Optionally colourises the native Windows DWM title bar.
+// Config (from config.titleBar):
+//   text          — string | null.  Window title; null → falls back to config.appTitle.
+//   overlayColor  — hex string | null.  Windows DWM title-bar background (e.g. "#1e1e2e").
+//   symbolColor   — hex string | null.  Windows DWM button / symbol colour.
+//   overlayHeight — number | null.     Windows DWM title-bar height in px.
+
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('title-bar')) return;
+
+  const {
+    text          = null,
+    overlayColor  = null,
+    symbolColor   = null,
+    overlayHeight = null
+  } = config.titleBar || {};
+
+  // Resolve title with best-effort fallback chain
+  const title = (typeof text === 'string' && text.trim().length > 0)
+    ? text.trim()
+    : (config.appTitle || config.projectName || 'App');
+
+  // Apply immediately, then re-apply after every page load so the website's
+  // own <title> element cannot override the app title.
+  function applyTitle() {
+    try { mainWindow.setTitle(title); } catch (_) {}
+  }
+
+  applyTitle();
+  mainWindow.webContents.on('did-finish-load', applyTitle);
+
+  // Suppress renderer-triggered title changes (e.g. via document.title = ...)
+  mainWindow.webContents.on('page-title-updated', (event) => {
+    event.preventDefault();
+    applyTitle();
+  });
+
+  // Windows: colourize the native DWM title bar when overlay options provided.
+  // Requires the BrowserWindow to have been created with titleBarOverlay:true;
+  // the call is silently swallowed when that option is absent.
+  if (process.platform === 'win32') {
+    const overlay = {};
+    if (overlayColor  != null) overlay.color       = overlayColor;
+    if (symbolColor   != null) overlay.symbolColor = symbolColor;
+    if (overlayHeight != null) overlay.height      = overlayHeight;
+
+    if (Object.keys(overlay).length > 0) {
+      try { mainWindow.setTitleBarOverlay(overlay); } catch (_) {}
+    }
+  }
+}
+
+function preloadSetup() {}
+
+function teardown(mainWindow) {
+  if (!mainWindow) return;
+  try {
+    mainWindow.webContents.removeAllListeners('did-finish-load');
+    mainWindow.webContents.removeAllListeners('page-title-updated');
+  } catch (_) {}
+}
+
+module.exports = { setup, preloadSetup, teardown };

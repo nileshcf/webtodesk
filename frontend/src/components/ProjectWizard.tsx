@@ -1,6 +1,13 @@
-import { useState } from 'react';
-import { Monitor, Globe, Tag, Cpu, ChevronRight, ChevronLeft, Check } from 'lucide-react';
+import { useState, KeyboardEvent } from 'react';
+import { Monitor, Globe, Tag, Cpu, ChevronRight, ChevronLeft, Check, X } from 'lucide-react';
 import { LicenseTier } from '../types/license';
+import type {
+  ModuleConfig,
+  DomainLockConfig,
+  TitleBarConfig,
+  WatermarkConfig,
+  ExpiryConfig,
+} from '../types';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -10,15 +17,17 @@ interface ModuleInfo {
   description: string;
   requiredTier: LicenseTier;
   available: boolean;
+  hasConfig: boolean;
 }
 
-interface WizardData {
+export interface WizardData {
   projectName: string;
   websiteUrl: string;
   appTitle: string;
   iconFile: string;
   enabledModules: string[];
   targetPlatform: 'auto' | 'win' | 'linux';
+  moduleConfig: ModuleConfig;
 }
 
 interface ProjectWizardProps {
@@ -33,41 +42,15 @@ interface ProjectWizardProps {
 // ─── Static module catalogue (mirrors ModuleRegistry.java) ──
 
 const ALL_MODULES: ModuleInfo[] = [
-  {
-    key: 'splash-screen',
-    name: 'Splash Screen',
-    description: 'Branded loading screen while the main URL loads',
-    requiredTier: LicenseTier.TRIAL,
-    available: true,
-  },
-  {
-    key: 'offline',
-    name: 'Offline Detection',
-    description: 'Shows a friendly error page when the network connection is lost',
-    requiredTier: LicenseTier.TRIAL,
-    available: true,
-  },
-  {
-    key: 'badge',
-    name: 'Badge Count',
-    description: 'Set dock/taskbar badge counter via IPC from the renderer',
-    requiredTier: LicenseTier.TRIAL,
-    available: true,
-  },
-  {
-    key: 'screen-protect',
-    name: 'Screen Protection',
-    description: 'OS-level content protection to prevent screenshots and recordings',
-    requiredTier: LicenseTier.PRO,
-    available: false,
-  },
-  {
-    key: 'deep-link',
-    name: 'Deep Link',
-    description: 'Register a custom URL protocol so the app can be launched via myapp:// links',
-    requiredTier: LicenseTier.PRO,
-    available: false,
-  },
+  { key: 'splash-screen', name: 'Splash Screen',     description: 'Branded loading screen while the main URL loads',                                    requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: false },
+  { key: 'offline',       name: 'Offline Detection', description: 'Shows a friendly error page when the network connection is lost',                    requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: false },
+  { key: 'badge',         name: 'Badge Count',       description: 'Set dock/taskbar badge counter via IPC from the renderer',                          requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: false },
+  { key: 'domain-lock',   name: 'Domain Lock',       description: 'Restrict navigation to allowed domains and block specified destinations',             requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: true  },
+  { key: 'title-bar',     name: 'Title Bar',         description: 'Set a custom window title that persists across page navigations',                    requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: true  },
+  { key: 'watermark',     name: 'Watermark Badge',   description: 'Persistent badge near window controls showing trial status and days remaining',       requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: true  },
+  { key: 'expiry',        name: 'Trial Expiry',      description: 'Locks the app with a full-screen overlay after a specified expiry date',             requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: true  },
+  { key: 'screen-protect',name: 'Screen Protection', description: 'OS-level content protection to prevent screenshots and recordings',                  requiredTier: LicenseTier.PRO,   available: false, hasConfig: false },
+  { key: 'deep-link',     name: 'Deep Link',         description: 'Register a custom URL protocol so the app can be launched via myapp:// links',       requiredTier: LicenseTier.PRO,   available: false, hasConfig: false },
 ];
 
 const STEPS = ['Basic Info', 'Features', 'Review'] as const;
@@ -87,6 +70,179 @@ function TierPill({ tier }: { tier: string }) {
       {tier}
     </span>
   );
+}
+
+// ─── Toggle ─────────────────────────────────────────────
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={`flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+        checked ? 'bg-accent-blue' : 'bg-white/15'
+      }`}
+    >
+      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+        checked ? 'translate-x-4' : 'translate-x-0.5'
+      }`} />
+    </button>
+  );
+}
+
+// ─── Tag Input ──────────────────────────────────────────
+
+function TagInput({
+  values,
+  onChange,
+  placeholder,
+}: {
+  values: string[];
+  onChange: (vals: string[]) => void;
+  placeholder?: string;
+}) {
+  const [input, setInput] = useState('');
+
+  const add = () => {
+    const v = input.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+    if (v && !values.includes(v)) onChange([...values, v]);
+    setInput('');
+  };
+
+  const handleKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add(); }
+    if (e.key === 'Backspace' && input === '' && values.length > 0) onChange(values.slice(0, -1));
+  };
+
+  return (
+    <div className="flex flex-wrap gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5 min-h-[38px]">
+      {values.map(v => (
+        <span key={v} className="inline-flex items-center gap-1 rounded-md bg-accent-blue/20 border border-accent-blue/20 px-2 py-0.5 text-[11px] font-medium text-accent-blue">
+          {v}
+          <button type="button" onClick={() => onChange(values.filter(x => x !== v))} className="text-accent-blue/50 hover:text-accent-blue ml-0.5">
+            <X size={9} />
+          </button>
+        </span>
+      ))}
+      <input
+        type="text"
+        value={input}
+        onChange={e => setInput(e.target.value)}
+        onKeyDown={handleKey}
+        onBlur={add}
+        placeholder={values.length === 0 ? placeholder : '+ add'}
+        className="flex-1 min-w-[120px] bg-transparent text-xs text-white/80 placeholder:text-white/25 outline-none"
+      />
+    </div>
+  );
+}
+
+// ─── Module Config Panels ────────────────────────────────
+
+const cfgInput = 'w-full rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-white/80 placeholder:text-white/25 outline-none focus:border-accent-blue/40 transition-colors';
+const cfgLabel = 'block text-[11px] font-medium text-white/40 uppercase tracking-wider mb-1';
+
+function DomainLockPanel({ cfg, onChange }: { cfg: DomainLockConfig; onChange: (p: Partial<DomainLockConfig>) => void }) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className={cfgLabel}>Allowed Domains</p>
+        <TagInput values={cfg.allowedDomains ?? []} onChange={v => onChange({ allowedDomains: v })} placeholder="e.g. example.com — press Enter" />
+        <p className="mt-1 text-[11px] text-white/25">Empty = allow all (except blocked). App base domain always allowed.</p>
+      </div>
+      <div>
+        <p className={cfgLabel}>Blocked Domains</p>
+        <TagInput values={cfg.blockedDomains ?? []} onChange={v => onChange({ blockedDomains: v })} placeholder="e.g. ads.example.com — press Enter" />
+      </div>
+      <div>
+        <p className={cfgLabel}>Block Message</p>
+        <input type="text" value={cfg.blockMessage ?? ''} onChange={e => onChange({ blockMessage: e.target.value })} placeholder="Navigation to this destination is not allowed." className={cfgInput} />
+      </div>
+      <label className="flex items-start gap-2.5 cursor-pointer">
+        <Toggle checked={cfg.allowExternalInBrowser ?? false} onChange={v => onChange({ allowExternalInBrowser: v })} />
+        <div>
+          <span className="text-xs font-medium text-white/70">Open blocked URLs in system browser</span>
+          <p className="text-[11px] text-white/30 mt-0.5">Opens the URL externally instead of showing a block alert.</p>
+        </div>
+      </label>
+    </div>
+  );
+}
+
+function TitleBarPanel({ cfg, onChange }: { cfg: TitleBarConfig; onChange: (p: Partial<TitleBarConfig>) => void }) {
+  return (
+    <div>
+      <p className={cfgLabel}>Window Title</p>
+      <input type="text" value={cfg.text ?? ''} onChange={e => onChange({ text: e.target.value })} placeholder="Leave blank to use App Title" className={cfgInput} />
+      <p className="mt-1 text-[11px] text-white/25">Overrides the native window title and persists across page navigations.</p>
+    </div>
+  );
+}
+
+const WM_POSITIONS = ['top-right', 'top-left', 'bottom-right', 'bottom-left'] as const;
+
+function WatermarkPanel({ cfg, onChange }: { cfg: WatermarkConfig; onChange: (p: Partial<WatermarkConfig>) => void }) {
+  const pos = cfg.position ?? 'top-right';
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className={cfgLabel}>Badge Text</p>
+        <input type="text" value={cfg.text ?? ''} onChange={e => onChange({ text: e.target.value })} placeholder='Leave blank → "Powered by WebToDesk"' className={cfgInput} />
+      </div>
+      <div>
+        <p className={cfgLabel}>Position</p>
+        <div className="grid grid-cols-2 gap-1.5">
+          {WM_POSITIONS.map(p => (
+            <button key={p} type="button" onClick={() => onChange({ position: p })} className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${
+              pos === p ? 'border-accent-blue/50 bg-accent-blue/15 text-white' : 'border-white/8 bg-white/[0.02] text-white/40 hover:text-white/70'
+            }`}>{p}</button>
+          ))}
+        </div>
+      </div>
+      <label className="flex items-center gap-2.5 cursor-pointer">
+        <Toggle checked={cfg.showDaysRemaining !== false} onChange={v => onChange({ showDaysRemaining: v })} />
+        <span className="text-xs font-medium text-white/70">Show days remaining <span className="text-white/30">(requires Trial Expiry module)</span></span>
+      </label>
+    </div>
+  );
+}
+
+function ExpiryPanel({ cfg, onChange }: { cfg: ExpiryConfig; onChange: (p: Partial<ExpiryConfig>) => void }) {
+  const localDt = cfg.expiresAt ? new Date(cfg.expiresAt).toISOString().substring(0, 16) : '';
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className={cfgLabel}>Expiry Date & Time</p>
+        <input type="datetime-local" value={localDt} onChange={e => onChange({ expiresAt: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className={cfgInput} />
+        <p className="mt-1 text-[11px] text-white/25">App locks with a full-screen overlay at this time. Leave blank to disable.</p>
+      </div>
+      <div>
+        <p className={cfgLabel}>Lock Message</p>
+        <input type="text" value={cfg.lockMessage ?? ''} onChange={e => onChange({ lockMessage: e.target.value })} placeholder="Your trial has expired. Please upgrade to continue." className={cfgInput} />
+      </div>
+      <div>
+        <p className={cfgLabel}>Upgrade URL</p>
+        <input type="url" value={cfg.upgradeUrl ?? ''} onChange={e => onChange({ upgradeUrl: e.target.value })} placeholder="https://webtodesk.com/pricing" className={cfgInput} />
+      </div>
+    </div>
+  );
+}
+
+function ModuleConfigPanel({
+  moduleKey, config, onChange,
+}: {
+  moduleKey: string;
+  config: ModuleConfig;
+  onChange: (mc: ModuleConfig) => void;
+}) {
+  function patch<T>(key: keyof ModuleConfig, p: Partial<T>) {
+    onChange({ ...config, [key]: { ...(config[key] as T), ...p } });
+  }
+  if (moduleKey === 'domain-lock') return <DomainLockPanel cfg={config.domainLock ?? {}} onChange={p => patch<DomainLockConfig>('domainLock', p)} />;
+  if (moduleKey === 'title-bar')   return <TitleBarPanel   cfg={config.titleBar   ?? {}} onChange={p => patch<TitleBarConfig>  ('titleBar',   p)} />;
+  if (moduleKey === 'watermark')   return <WatermarkPanel  cfg={config.watermark  ?? {}} onChange={p => patch<WatermarkConfig> ('watermark',  p)} />;
+  if (moduleKey === 'expiry')      return <ExpiryPanel     cfg={config.expiry     ?? {}} onChange={p => patch<ExpiryConfig>    ('expiry',     p)} />;
+  return null;
 }
 
 // ─── Step 1 — Basic Info ────────────────────────────────
@@ -195,7 +351,7 @@ function FeaturesStep({
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       {devMode && (
         <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/20 px-3 py-2.5">
           <span className="text-amber-400 text-xs font-bold">⚡ DEV MODE</span>
@@ -203,8 +359,8 @@ function FeaturesStep({
         </div>
       )}
 
-      <p className="text-xs text-white/40">
-        Toggle the modules to bundle in your desktop app.{!devMode && ' Locked modules require a plan upgrade.'}
+      <p className="text-xs text-white/40 pb-0.5">
+        Toggle modules to bundle in your app.{!devMode && ' Locked modules require a plan upgrade.'}
       </p>
 
       {ALL_MODULES.map(mod => {
@@ -214,42 +370,64 @@ function FeaturesStep({
         return (
           <div
             key={mod.key}
-            onClick={() => toggleModule(mod.key, accessible)}
-            className={`flex items-start gap-3 rounded-xl border p-3.5 transition-all ${
+            className={`rounded-xl border transition-all overflow-hidden ${
               !accessible
-                ? 'cursor-not-allowed border-white/5 bg-white/[0.02] opacity-40'
+                ? 'border-white/5 bg-white/[0.02] opacity-40'
                 : enabled
-                ? 'cursor-pointer border-accent-blue/40 bg-accent-blue/10'
-                : 'cursor-pointer border-white/8 bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.06]'
+                ? 'border-accent-blue/40 bg-accent-blue/10'
+                : 'border-white/8 bg-white/[0.03] hover:border-white/12'
             }`}
           >
-            <div className="mt-0.5 flex-shrink-0">
-              <div className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                !accessible ? 'bg-white/10' : enabled ? 'bg-accent-blue' : 'bg-white/15'
-              }`}>
-                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-                  enabled && accessible ? 'translate-x-4' : 'translate-x-0.5'
-                }`} />
+            {/* Clickable toggle row */}
+            <div
+              onClick={() => toggleModule(mod.key, accessible)}
+              className={`flex items-start gap-3 p-3.5 ${
+                accessible ? 'cursor-pointer' : 'cursor-not-allowed'
+              }`}
+            >
+              <div className="mt-0.5 flex-shrink-0">
+                <div className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  !accessible ? 'bg-white/10' : enabled ? 'bg-accent-blue' : 'bg-white/15'
+                }`}>
+                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                    enabled && accessible ? 'translate-x-4' : 'translate-x-0.5'
+                  }`} />
+                </div>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-semibold text-white">{mod.name}</span>
+                  {devMode
+                    ? <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/25">DEV</span>
+                    : <TierPill tier={mod.requiredTier} />}
+                </div>
+                <p className="mt-0.5 text-xs text-white/40">{mod.description}</p>
+                {!accessible && !devMode && (
+                  <p className="mt-1 text-xs font-medium text-amber-400/70">Requires {mod.requiredTier} plan</p>
+                )}
               </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-semibold text-white">{mod.name}</span>
-                {devMode
-                  ? <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/25">DEV</span>
-                  : <TierPill tier={mod.requiredTier} />}
+
+            {/* Per-module config panel — shown when enabled */}
+            {mod.hasConfig && enabled && accessible && (
+              <div
+                className="px-3.5 pb-3.5 border-t border-white/[0.08]"
+                onClick={e => e.stopPropagation()}
+              >
+                <p className="text-[11px] font-semibold text-accent-blue/70 uppercase tracking-wider pt-2.5 pb-2">Configure</p>
+                <ModuleConfigPanel
+                  moduleKey={mod.key}
+                  config={data.moduleConfig}
+                  onChange={mc => onChange({ moduleConfig: mc })}
+                />
               </div>
-              <p className="mt-0.5 text-xs text-white/40">{mod.description}</p>
-              {!accessible && !devMode && (
-                <p className="mt-1 text-xs font-medium text-amber-400/70">Requires {mod.requiredTier} plan</p>
-              )}
-            </div>
+            )}
           </div>
         );
       })}
 
-      {/* OS Target — win / linux only, no auto */}
-      <div className="mt-2 pt-4 border-t border-white/[0.06]">
+      {/* OS Target */}
+      <div className="pt-3 border-t border-white/[0.06]">
         <p className="text-xs font-medium text-white/50 uppercase tracking-wider mb-2.5">
           <Cpu size={11} className="inline mr-1.5 mb-0.5" />
           Build Target OS
@@ -280,8 +458,35 @@ function FeaturesStep({
 
 // ─── Step 3 — Review ────────────────────────────────────
 
+function moduleConfigSummary(key: string, mc: ModuleConfig): string | null {
+  if (key === 'domain-lock') {
+    const dl = mc.domainLock ?? {};
+    const allow = dl.allowedDomains?.length ? dl.allowedDomains.join(', ') : 'all';
+    const block = dl.blockedDomains?.length ? dl.blockedDomains.join(', ') : 'none';
+    return `allow: ${allow} · block: ${block}`;
+  }
+  if (key === 'title-bar') {
+    return mc.titleBar?.text ? `"${mc.titleBar.text}"` : 'uses App Title';
+  }
+  if (key === 'watermark') {
+    const wm = mc.watermark ?? {};
+    const text = wm.text || 'Powered by WebToDesk';
+    const pos  = wm.position || 'top-right';
+    const days = wm.showDaysRemaining !== false ? ' · days remaining' : '';
+    return `${text} · ${pos}${days}`;
+  }
+  if (key === 'expiry') {
+    const ex = mc.expiry ?? {};
+    return ex.expiresAt
+      ? `expires ${new Date(ex.expiresAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}`
+      : 'no expiry set';
+  }
+  return null;
+}
+
 function ReviewStep({ data }: { data: WizardData }) {
   const moduleNames = ALL_MODULES.filter(m => data.enabledModules.includes(m.key)).map(m => m.name);
+  const configuredMods = ALL_MODULES.filter(m => m.hasConfig && data.enabledModules.includes(m.key));
   const osLabel = data.targetPlatform === 'win' ? '🪟 Windows (.exe / .msi)' : '🐧 Linux (.AppImage / .deb)';
 
   return (
@@ -315,6 +520,22 @@ function ReviewStep({ data }: { data: WizardData }) {
             </div>
           )}
         </div>
+        {configuredMods.length > 0 && (
+          <div className="flex items-start gap-4 px-4 py-3">
+            <span className="w-28 flex-shrink-0 text-xs font-medium text-white/35 uppercase tracking-wide pt-0.5">Config</span>
+            <div className="space-y-1.5 flex-1">
+              {configuredMods.map(mod => {
+                const summary = moduleConfigSummary(mod.key, data.moduleConfig);
+                return (
+                  <div key={mod.key} className="flex items-baseline gap-2">
+                    <span className="text-[11px] font-semibold text-accent-blue/80 w-20 flex-shrink-0">{mod.name}</span>
+                    <span className="text-xs text-white/50 break-all">{summary ?? '—'}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -339,6 +560,7 @@ export default function ProjectWizard({
     iconFile:    '',
     enabledModules: [],
     targetPlatform: 'linux',
+    moduleConfig: {},
     ...initialData,
   });
 

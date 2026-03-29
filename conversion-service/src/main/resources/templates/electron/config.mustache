@@ -5,5 +5,17 @@ module.exports = {
   appTitle: '{{appTitle}}',
   websiteUrl: '{{websiteUrl}}',
   iconFile: '{{iconFile}}',
-  modules: {{{modulesJson}}}
+  modules: {{{modulesJson}}},
+{{#hasDomainLock}}
+  domainLock: {{{domainLockConfigJson}}},
+{{/hasDomainLock}}
+{{#hasTitleBar}}
+  titleBar: {{{titleBarConfigJson}}},
+{{/hasTitleBar}}
+{{#hasWatermark}}
+  watermark: {{{watermarkConfigJson}}},
+{{/hasWatermark}}
+{{#hasExpiry}}
+  expiry: {{{expiryConfigJson}}},
+{{/hasExpiry}}
 };

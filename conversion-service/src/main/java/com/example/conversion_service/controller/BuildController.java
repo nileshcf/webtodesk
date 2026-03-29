@@ -242,7 +242,8 @@ public class BuildController {
                 req.resolvedAppTitle(),
                 req.iconFile(),
                 req.modules(),
-                req.platform()
+                req.platform(),
+                null
         );
 
         ConversionResponse created = conversionService.create(createReq, userEmail);
