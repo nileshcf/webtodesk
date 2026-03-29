@@ -19,10 +19,16 @@ import java.util.List;
 @AllArgsConstructor
 public class ModuleConfig {
 
-    private DomainLockConfig domainLock;
-    private TitleBarConfig   titleBar;
-    private WatermarkConfig  watermark;
-    private ExpiryConfig     expiry;
+    private DomainLockConfig   domainLock;
+    private TitleBarConfig     titleBar;
+    private WatermarkConfig    watermark;
+    private ExpiryConfig       expiry;
+    private SystemTrayConfig   systemTray;
+    private RightClickConfig   rightClick;
+    private AutoUpdateConfig   autoUpdate;
+    private KeyBindingsConfig  keyBindings;
+    private WindowPolishConfig windowPolish;
+    private ClipboardConfig    clipboard;
 
     // ── Domain Lock ───────────────────────────────────────────────────────────
 
@@ -145,5 +151,117 @@ public class ModuleConfig {
         /** URL of the upgrade/pricing page shown on the lock screen. */
         @Builder.Default
         private String upgradeUrl = "https://webtodesk.com/pricing";
+    }
+
+    // ── System Tray ───────────────────────────────────────────────────────────
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SystemTrayConfig {
+        /** Tooltip shown when hovering the tray icon. Null = appTitle. */
+        private String tooltip;
+
+        /** Context menu items. Each item has a label and an action. */
+        @Builder.Default
+        private List<TrayMenuItem> items = new ArrayList<>();
+
+        @Data
+        @Builder
+        @NoArgsConstructor
+        @AllArgsConstructor
+        public static class TrayMenuItem {
+            /** Display label (ignored for separator type). */
+            private String label;
+            /** Action: show | quit | reload | toggle | separator. */
+            @Builder.Default
+            private String action = "show";
+            /** Item type: item | separator. */
+            @Builder.Default
+            private String type = "item";
+        }
+    }
+
+    // ── Right-Click ───────────────────────────────────────────────────────────
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class RightClickConfig {
+        /** When true, the context menu is completely suppressed. */
+        @Builder.Default
+        private boolean disable = true;
+    }
+
+    // ── Auto-Update ───────────────────────────────────────────────────────────
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AutoUpdateConfig {
+        /** electron-updater feed URL (GitHub Releases or generic update server). */
+        private String feedUrl;
+    }
+
+    // ── Key Bindings ──────────────────────────────────────────────────────────
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class KeyBindingsConfig {
+        /** List of keyboard shortcuts to register. */
+        @Builder.Default
+        private List<Binding> bindings = new ArrayList<>();
+
+        @Data
+        @Builder
+        @NoArgsConstructor
+        @AllArgsConstructor
+        public static class Binding {
+            /** Electron accelerator string, e.g. "Ctrl+R". */
+            private String accelerator;
+            /** Action: reload | goBack | goForward | toggleDevTools | toggleFullscreen | minimize. */
+            private String action;
+        }
+    }
+
+    // ── Window Polish ─────────────────────────────────────────────────────────
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class WindowPolishConfig {
+        /** Apply vibrancy/acrylic blur behind the window. */
+        @Builder.Default
+        private boolean blur = false;
+
+        /** Pin the window above all others. */
+        @Builder.Default
+        private boolean alwaysOnTop = false;
+
+        /** Window opacity (0.0–1.0). 1.0 = fully opaque. */
+        @Builder.Default
+        private double opacity = 1.0;
+    }
+
+    // ── Clipboard ─────────────────────────────────────────────────────────────
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ClipboardConfig {
+        /** Allow renderer to read from the clipboard. */
+        @Builder.Default
+        private boolean allowRead = true;
+
+        /** Allow renderer to write to the clipboard. */
+        @Builder.Default
+        private boolean allowWrite = true;
     }
 }

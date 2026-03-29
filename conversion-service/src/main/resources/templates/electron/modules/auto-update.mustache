@@ -1,0 +1,41 @@
+// Module: auto-update — Tier: STARTER
+// Configures electron-updater to check for and install new versions automatically.
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('auto-update')) return;
+
+  const { feedUrl = '' } = config.autoUpdate || {};
+  if (!feedUrl) return;
+
+  try {
+    const { autoUpdater } = require('electron-updater');
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.setFeedURL({ url: feedUrl });
+
+    autoUpdater.on('update-available', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('wtd-update-available');
+      }
+    });
+
+    autoUpdater.on('update-downloaded', () => {
+      autoUpdater.quitAndInstall(false, true);
+    });
+
+    autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+  } catch (_) {
+    // electron-updater not bundled — skip silently
+  }
+}
+
+function preloadSetup(contextBridge, ipcRenderer, config) {
+  if (!config.modules?.includes('auto-update')) return;
+
+  contextBridge.exposeInMainWorld('wtdUpdater', {
+    onUpdateAvailable: (cb) => ipcRenderer.on('wtd-update-available', (_, data) => cb(data))
+  });
+}
+
+function teardown() {}
+
+module.exports = { setup, preloadSetup, teardown };

@@ -1,0 +1,36 @@
+// Module: clipboard — Tier: STARTER
+// Exposes clipboard read/write to the renderer via a secure contextBridge IPC bridge.
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('clipboard')) return;
+
+  const { clipboard, ipcMain } = require('electron');
+  const { allowRead = true, allowWrite = true } = config.clipboard || {};
+
+  if (allowRead) {
+    ipcMain.handle('wtd-clipboard-read', () => clipboard.readText());
+  }
+
+  if (allowWrite) {
+    ipcMain.handle('wtd-clipboard-write', (_, text) => {
+      clipboard.writeText(String(text ?? ''));
+    });
+  }
+}
+
+function preloadSetup(contextBridge, ipcRenderer, config) {
+  if (!config.modules?.includes('clipboard')) return;
+
+  const { allowRead = true, allowWrite = true } = config.clipboard || {};
+
+  const api = {};
+  if (allowRead)  api.read  = ()     => ipcRenderer.invoke('wtd-clipboard-read');
+  if (allowWrite) api.write = (text) => ipcRenderer.invoke('wtd-clipboard-write', text);
+
+  if (allowRead || allowWrite) {
+    contextBridge.exposeInMainWorld('wtdClipboard', api);
+  }
+}
+
+function teardown() {}
+
+module.exports = { setup, preloadSetup, teardown };

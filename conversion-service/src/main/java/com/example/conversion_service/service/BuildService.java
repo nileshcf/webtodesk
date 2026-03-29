@@ -925,6 +925,69 @@ public class BuildService {
                     : new com.example.conversion_service.dto.ModuleConfig.ExpiryConfig();
             ctx.put("expiryConfigJson", toJson(ec));
         }
+
+        ctx.put("hasNotifications", resolved.contains("notifications"));
+        ctx.put("hasDarkMode",      resolved.contains("dark-mode"));
+
+        boolean hasSystemTray = resolved.contains("system-tray");
+        ctx.put("hasSystemTray", hasSystemTray);
+        if (hasSystemTray) {
+            com.example.conversion_service.dto.ModuleConfig.SystemTrayConfig stc =
+                    (mc != null && mc.getSystemTray() != null)
+                    ? mc.getSystemTray()
+                    : new com.example.conversion_service.dto.ModuleConfig.SystemTrayConfig();
+            ctx.put("systemTrayConfigJson", toJson(stc));
+        }
+
+        boolean hasRightClick = resolved.contains("right-click");
+        ctx.put("hasRightClick", hasRightClick);
+        if (hasRightClick) {
+            com.example.conversion_service.dto.ModuleConfig.RightClickConfig rcc =
+                    (mc != null && mc.getRightClick() != null)
+                    ? mc.getRightClick()
+                    : new com.example.conversion_service.dto.ModuleConfig.RightClickConfig();
+            ctx.put("rightClickConfigJson", toJson(rcc));
+        }
+
+        boolean hasAutoUpdate = resolved.contains("auto-update");
+        ctx.put("hasAutoUpdate", hasAutoUpdate);
+        if (hasAutoUpdate) {
+            com.example.conversion_service.dto.ModuleConfig.AutoUpdateConfig auc =
+                    (mc != null && mc.getAutoUpdate() != null)
+                    ? mc.getAutoUpdate()
+                    : new com.example.conversion_service.dto.ModuleConfig.AutoUpdateConfig();
+            ctx.put("autoUpdateConfigJson", toJson(auc));
+        }
+
+        boolean hasKeyBindings = resolved.contains("key-bindings");
+        ctx.put("hasKeyBindings", hasKeyBindings);
+        if (hasKeyBindings) {
+            com.example.conversion_service.dto.ModuleConfig.KeyBindingsConfig kbc =
+                    (mc != null && mc.getKeyBindings() != null)
+                    ? mc.getKeyBindings()
+                    : new com.example.conversion_service.dto.ModuleConfig.KeyBindingsConfig();
+            ctx.put("keyBindingsConfigJson", toJson(kbc));
+        }
+
+        boolean hasWindowPolish = resolved.contains("window-polish");
+        ctx.put("hasWindowPolish", hasWindowPolish);
+        if (hasWindowPolish) {
+            com.example.conversion_service.dto.ModuleConfig.WindowPolishConfig wpc =
+                    (mc != null && mc.getWindowPolish() != null)
+                    ? mc.getWindowPolish()
+                    : new com.example.conversion_service.dto.ModuleConfig.WindowPolishConfig();
+            ctx.put("windowPolishConfigJson", toJson(wpc));
+        }
+
+        boolean hasClipboard = resolved.contains("clipboard");
+        ctx.put("hasClipboard", hasClipboard);
+        if (hasClipboard) {
+            com.example.conversion_service.dto.ModuleConfig.ClipboardConfig cc =
+                    (mc != null && mc.getClipboard() != null)
+                    ? mc.getClipboard()
+                    : new com.example.conversion_service.dto.ModuleConfig.ClipboardConfig();
+            ctx.put("clipboardConfigJson", toJson(cc));
+        }
     }
 
     private static String toJson(Object obj) {

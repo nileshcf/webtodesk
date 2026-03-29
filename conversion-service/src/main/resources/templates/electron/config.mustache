@@ -18,4 +18,22 @@ module.exports = {
 {{#hasExpiry}}
   expiry: {{{expiryConfigJson}}},
 {{/hasExpiry}}
+{{#hasSystemTray}}
+  systemTray: {{{systemTrayConfigJson}}},
+{{/hasSystemTray}}
+{{#hasRightClick}}
+  rightClick: {{{rightClickConfigJson}}},
+{{/hasRightClick}}
+{{#hasAutoUpdate}}
+  autoUpdate: {{{autoUpdateConfigJson}}},
+{{/hasAutoUpdate}}
+{{#hasKeyBindings}}
+  keyBindings: {{{keyBindingsConfigJson}}},
+{{/hasKeyBindings}}
+{{#hasWindowPolish}}
+  windowPolish: {{{windowPolishConfigJson}}},
+{{/hasWindowPolish}}
+{{#hasClipboard}}
+  clipboard: {{{clipboardConfigJson}}},
+{{/hasClipboard}}
 };

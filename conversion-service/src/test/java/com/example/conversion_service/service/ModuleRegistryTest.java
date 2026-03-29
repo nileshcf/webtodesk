@@ -24,9 +24,9 @@ class ModuleRegistryTest {
     // ─── getAllModules ────────────────────────────────────
 
     @Test
-    void getAllModules_returnsNine() {
+    void getAllModules_returnsSeventeen() {
         List<ModuleDefinition> all = registry.getAllModules();
-        assertThat(all).hasSize(9);
+        assertThat(all).hasSize(17);
     }
 
     @Test
@@ -34,7 +34,10 @@ class ModuleRegistryTest {
         List<String> keys = registry.getAllModules().stream()
                 .map(ModuleDefinition::key).toList();
         assertThat(keys).containsExactlyInAnyOrder(
-                "splash-screen", "offline", "badge", "domain-lock", "title-bar", "watermark", "expiry", "screen-protect", "deep-link");
+                "splash-screen", "offline", "badge", "domain-lock", "title-bar", "watermark", "expiry",
+                "notifications", "system-tray", "dark-mode", "right-click", "auto-update",
+                "key-bindings", "window-polish", "clipboard",
+                "screen-protect", "deep-link");
     }
 
     // ─── getAvailableModules by tier ─────────────────────
@@ -48,21 +51,21 @@ class ModuleRegistryTest {
     }
 
     @Test
-    void getAvailableModules_starter_returnsSevenModules() {
+    void getAvailableModules_starter_returnsFifteenModules() {
         List<ModuleDefinition> modules = registry.getAvailableModules(LicenseTier.STARTER);
-        assertThat(modules).hasSize(7);
+        assertThat(modules).hasSize(15);
     }
 
     @Test
-    void getAvailableModules_pro_returnsAllNine() {
+    void getAvailableModules_pro_returnsAllSeventeen() {
         List<ModuleDefinition> modules = registry.getAvailableModules(LicenseTier.PRO);
-        assertThat(modules).hasSize(9);
+        assertThat(modules).hasSize(17);
     }
 
     @Test
-    void getAvailableModules_lifetime_returnsAllNine() {
+    void getAvailableModules_lifetime_returnsAllSeventeen() {
         List<ModuleDefinition> modules = registry.getAvailableModules(LicenseTier.LIFETIME);
-        assertThat(modules).hasSize(9);
+        assertThat(modules).hasSize(17);
     }
 
     // ─── isAvailable ─────────────────────────────────────
@@ -82,6 +85,36 @@ class ModuleRegistryTest {
     void isAvailable_proModuleOnTrial_returnsFalse() {
         assertThat(registry.isAvailable("screen-protect", LicenseTier.TRIAL)).isFalse();
         assertThat(registry.isAvailable("deep-link", LicenseTier.TRIAL)).isFalse();
+    }
+
+    @Test
+    void isAvailable_starterModulesOnTrial_returnsFalse() {
+        assertThat(registry.isAvailable("notifications", LicenseTier.TRIAL)).isFalse();
+        assertThat(registry.isAvailable("system-tray",   LicenseTier.TRIAL)).isFalse();
+        assertThat(registry.isAvailable("dark-mode",     LicenseTier.TRIAL)).isFalse();
+        assertThat(registry.isAvailable("right-click",   LicenseTier.TRIAL)).isFalse();
+        assertThat(registry.isAvailable("auto-update",   LicenseTier.TRIAL)).isFalse();
+        assertThat(registry.isAvailable("key-bindings",  LicenseTier.TRIAL)).isFalse();
+        assertThat(registry.isAvailable("window-polish", LicenseTier.TRIAL)).isFalse();
+        assertThat(registry.isAvailable("clipboard",     LicenseTier.TRIAL)).isFalse();
+    }
+
+    @Test
+    void isAvailable_starterModulesOnStarter_returnsTrue() {
+        assertThat(registry.isAvailable("notifications", LicenseTier.STARTER)).isTrue();
+        assertThat(registry.isAvailable("system-tray",   LicenseTier.STARTER)).isTrue();
+        assertThat(registry.isAvailable("dark-mode",     LicenseTier.STARTER)).isTrue();
+        assertThat(registry.isAvailable("right-click",   LicenseTier.STARTER)).isTrue();
+        assertThat(registry.isAvailable("auto-update",   LicenseTier.STARTER)).isTrue();
+        assertThat(registry.isAvailable("key-bindings",  LicenseTier.STARTER)).isTrue();
+        assertThat(registry.isAvailable("window-polish", LicenseTier.STARTER)).isTrue();
+        assertThat(registry.isAvailable("clipboard",     LicenseTier.STARTER)).isTrue();
+    }
+
+    @Test
+    void isAvailable_proModulesOnStarter_returnsFalse() {
+        assertThat(registry.isAvailable("screen-protect", LicenseTier.STARTER)).isFalse();
+        assertThat(registry.isAvailable("deep-link",      LicenseTier.STARTER)).isFalse();
     }
 
     @Test
@@ -133,8 +166,11 @@ class ModuleRegistryTest {
     @Test
     void resolveEnabledModules_proTier_allowsAllModules() {
         List<String> resolved = registry.resolveEnabledModules(
-                List.of("offline", "badge", "domain-lock", "title-bar", "watermark", "expiry", "screen-protect", "deep-link"), LicenseTier.PRO);
-        assertThat(resolved).hasSize(8);
+                List.of("offline", "badge", "domain-lock", "title-bar", "watermark", "expiry",
+                        "notifications", "system-tray", "dark-mode", "right-click",
+                        "auto-update", "key-bindings", "window-polish", "clipboard",
+                        "screen-protect", "deep-link"), LicenseTier.PRO);
+        assertThat(resolved).hasSize(16);
     }
 
     // ─── expiry specific ────────────────────────────────

@@ -1,0 +1,39 @@
+// Module: key-bindings — Tier: STARTER
+// Registers configurable in-app keyboard shortcuts.
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('key-bindings')) return;
+
+  const { globalShortcut, app } = require('electron');
+  const { bindings = [] } = config.keyBindings || {};
+
+  app.whenReady().then(() => {
+    bindings.forEach(({ accelerator, action }) => {
+      if (!accelerator || !action) return;
+      try {
+        const registered = globalShortcut.register(accelerator, () => {
+          if (!mainWindow || mainWindow.isDestroyed()) return;
+          switch (action) {
+            case 'reload':           mainWindow.reload(); break;
+            case 'goBack':           mainWindow.webContents.goBack(); break;
+            case 'goForward':        mainWindow.webContents.goForward(); break;
+            case 'toggleDevTools':   mainWindow.webContents.toggleDevTools(); break;
+            case 'toggleFullscreen': mainWindow.setFullScreen(!mainWindow.isFullScreen()); break;
+            case 'minimize':         mainWindow.minimize(); break;
+            case 'maximize':         mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize(); break;
+          }
+        });
+        if (!registered) {
+          console.warn('[key-bindings] Could not register accelerator:', accelerator);
+        }
+      } catch (e) {
+        console.warn('[key-bindings] Error registering accelerator:', accelerator, e.message);
+      }
+    });
+  }).catch(() => {});
+}
+
+function preloadSetup() {}
+
+function teardown() {}
+
+module.exports = { setup, preloadSetup, teardown };

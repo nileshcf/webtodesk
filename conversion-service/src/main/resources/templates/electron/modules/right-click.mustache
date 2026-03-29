@@ -1,0 +1,38 @@
+// Module: right-click — Tier: STARTER
+// Suppresses or replaces the right-click context menu.
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('right-click')) return;
+
+  const { Menu, ipcMain } = require('electron');
+  const { disable = true } = config.rightClick || {};
+
+  if (!disable) {
+    ipcMain.on('wtd-show-context-menu', (event, params) => {
+      const menu = Menu.buildFromTemplate([
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]);
+      menu.popup({ window: mainWindow, x: params?.x, y: params?.y });
+    });
+  }
+}
+
+function preloadSetup(contextBridge, ipcRenderer, config) {
+  if (!config.modules?.includes('right-click')) return;
+
+  const { disable = true } = config.rightClick || {};
+
+  if (disable) {
+    window.addEventListener('contextmenu', e => e.preventDefault(), true);
+  } else {
+    window.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      ipcRenderer.send('wtd-show-context-menu', { x: e.clientX, y: e.clientY });
+    }, true);
+  }
+}
+
+function teardown() {}
+
+module.exports = { setup, preloadSetup, teardown };
