@@ -166,6 +166,15 @@ export const authApi = {
     return res.data;
   },
 
+  async uploadAvatar(file: File): Promise<UserProfileDetails> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await api.post<UserProfileDetails>('/user/me/avatar', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
+  },
+
   async getProfile() {
     const profile = await authApi.getProfileDetails();
     return {
