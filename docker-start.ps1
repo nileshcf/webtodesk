@@ -64,7 +64,10 @@ try {
     $env:COMPOSE_DOCKER_CLI_BUILD = "1"
 
     # Verify an image exists for the compose service before trying to start
-    $builtImage = docker compose images -q 2>$null
+    # docker compose images -q only shows images of running/stopped containers,
+    # so query docker images directly for the expected compose image name.
+    $builtImage = docker images --format "{{.Repository}}:{{.Tag}}" 2>$null |
+        Where-Object { $_ -match "webtodesk" }
     if (-not $builtImage) {
         throw "No image found for compose service. Run .\docker-rebuild.ps1 first."
     }
