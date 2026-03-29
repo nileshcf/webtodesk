@@ -3,13 +3,72 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Globe, Monitor, Trash2, Download, Loader2,
   ExternalLink, X, AlertCircle, CheckCircle2, Sparkles, Rocket, Shield,
-  Package, FileDown, History
+  Package, FileDown, History, Zap
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { conversionApi } from '../services/api';
-import type { ConversionProject, ElectronConfig } from '../types';
+import type { ConversionProject, ConversionStats, ElectronConfig, LicenseTier } from '../types';
 import ProjectWizard, { type WizardData } from '../components/ProjectWizard';
 import BuildDashboard from '../components/BuildDashboard';
+
+const TIER_META: Record<LicenseTier, { label: string; color: string; bg: string; ring: string }> = {
+  TRIAL:    { label: 'Trial',    color: 'text-white/50',       bg: 'bg-white/[0.05]',       ring: 'ring-white/10' },
+  STARTER:  { label: 'Starter',  color: 'text-accent-blue',    bg: 'bg-accent-blue/10',     ring: 'ring-accent-blue/20' },
+  PRO:      { label: 'Pro',      color: 'text-accent-violet',  bg: 'bg-accent-violet/10',   ring: 'ring-accent-violet/20' },
+  LIFETIME: { label: 'Lifetime', color: 'text-accent-green',   bg: 'bg-accent-green/10',    ring: 'ring-accent-green/20' },
+};
+
+function TierQuotaBanner({ stats }: { stats: ConversionStats }) {
+  const meta = TIER_META[stats.tier] ?? TIER_META.TRIAL;
+  const used = stats.buildsAllowed - stats.buildsRemaining;
+  const pct = stats.buildsAllowed > 0 ? Math.min(100, (used / stats.buildsAllowed) * 100) : 0;
+  const quotaColor = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-accent-orange' : 'bg-accent-blue';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.03 }}
+      className="glass-card p-4 sm:p-5 mb-6 flex flex-col sm:flex-row sm:items-center gap-4"
+    >
+      {/* Tier badge */}
+      <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl ring-1 ${meta.bg} ${meta.ring} flex-shrink-0`}>
+        <Zap size={13} className={meta.color} />
+        <span className={`text-xs font-semibold tracking-wide uppercase ${meta.color}`}>{meta.label}</span>
+      </div>
+
+      {/* Quota bar */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-xs text-white/40">Builds used</span>
+          <span className="text-xs font-medium text-white/60">
+            {used}
+            {stats.buildsAllowed < 9999 ? ` / ${stats.buildsAllowed}` : ' (unlimited)'}
+          </span>
+        </div>
+        <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+          <motion.div
+            className={`h-full rounded-full ${quotaColor}`}
+            initial={{ width: 0 }}
+            animate={{ width: `${pct}%` }}
+            transition={{ duration: 0.6, ease: 'easeOut' }}
+          />
+        </div>
+      </div>
+
+      {/* Project count */}
+      <div className="flex items-center gap-3 flex-shrink-0 text-xs text-white/30">
+        <span>{stats.totalProjects} project{stats.totalProjects !== 1 ? 's' : ''}</span>
+        {stats.readyProjects > 0 && (
+          <span className="text-accent-green">{stats.readyProjects} ready</span>
+        )}
+        {stats.licenseExpiresAt && (
+          <span className="text-white/20">Expires {new Date(stats.licenseExpiresAt).toLocaleDateString()}</span>
+        )}
+      </div>
+    </motion.div>
+  );
+}
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -26,6 +85,7 @@ export default function DashboardPage() {
   const [buildLog, setBuildLog] = useState<Record<string, string>>({});
   const [buildError, setBuildError] = useState<Record<string, string>>({});
   const [expandedHistory, setExpandedHistory] = useState<Set<string>>(new Set());
+  const [stats, setStats] = useState<ConversionStats | null>(null);
   const eventSources = useRef<Record<string, AbortController>>({});
 
   const fetchProjects = useCallback(async () => {
@@ -40,6 +100,10 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
+
+  useEffect(() => {
+    conversionApi.getStats().then(setStats).catch(() => {});
+  }, []);
 
   const handleWizardSubmit = async (wizardData: WizardData) => {
     setFormError('');
@@ -265,6 +329,9 @@ export default function DashboardPage() {
             {showForm && !editingProject ? 'Cancel' : 'New Conversion'}
           </button>
         </motion.div>
+
+        {/* License Tier + Build Quota Banner */}
+        {stats && <TierQuotaBanner stats={stats} />}
 
         {/* Quick Actions / Overview (aesthetic, removable later if desired) */}
         <motion.div

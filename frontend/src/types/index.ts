@@ -120,6 +120,22 @@ export interface UserProfileDetails {
   updatedAt: string;
 }
 
+export type LicenseTier = 'TRIAL' | 'STARTER' | 'PRO' | 'LIFETIME';
+
+export interface ConversionStats {
+  userEmail: string;
+  totalProjects: number;
+  draftProjects: number;
+  readyProjects: number;
+  buildingProjects: number;
+  failedProjects: number;
+  totalBuilds: number;
+  buildsAllowed: number;
+  buildsRemaining: number;
+  tier: LicenseTier;
+  licenseExpiresAt: string | null;
+}
+
 export interface UpdateProfileRequest {
   username: string | null;
   name: string | null;

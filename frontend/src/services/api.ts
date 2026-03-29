@@ -2,7 +2,7 @@ import axios from 'axios';
 import type {
   LoginRequest, SignupRequest, AuthTokens, ConversionProject,
   CreateConversionRequest, ElectronConfig, BuildStatusResponse,
-  User, UserProfileDetails, UpdateProfileRequest
+  User, UserProfileDetails, UpdateProfileRequest, ConversionStats
 } from '../types';
 
 const api = axios.create({
@@ -280,5 +280,10 @@ export const conversionApi = {
   async userBuildHistory(limit = 10) {
     const res = await api.get(`/conversion/build/metrics?period=month`);
     return res.data as { recentBuilds: any[]; queueStats: any };
+  },
+
+  async getStats(): Promise<ConversionStats> {
+    const res = await api.get<ConversionStats>('/conversion/conversions/stats');
+    return res.data;
   },
 };
