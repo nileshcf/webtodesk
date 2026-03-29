@@ -16,7 +16,8 @@ import com.google.firebase.auth.FirebaseToken;
 import io.jsonwebtoken.Claims;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -32,10 +33,11 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuthService {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
     private final UserRepository userRepository;
     private final UserProfileRepository userProfileRepository;
@@ -145,12 +147,6 @@ public class AuthService {
             log.error("Unexpected error during login for email: {} - Error: {}", request.email(), e.getMessage(), e);
             throw new RuntimeException("Login failed due to unexpected error", e);
         }
-
-        // 2. Fetch user — guaranteed to exist after authentication passes
-        User user = userRepository.findByEmail(request.email())
-                .orElseThrow(() -> new RuntimeException("User not found"));
-
-        return generateLoginResponse(user);
     }
     
     public LoginResponse googleAuth(GoogleAuthRequest request) {

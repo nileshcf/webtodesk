@@ -8,18 +8,24 @@ import com.example.user_service.enums.Roles;
 import com.example.user_service.repositories.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.stream.Collectors;
 
-@Slf4j
+import org.springframework.web.multipart.MultipartFile;
+import java.io.IOException;
+
 @Service
 @RequiredArgsConstructor
 public class UserService {
 
+	private static final Logger log = LoggerFactory.getLogger(UserService.class);
+
 	private final UserRepository userRepository;
+	private final R2StorageService r2StorageService;
 
 	// ─────────────────────────────────────────
 	// GET /users/me
@@ -108,6 +114,26 @@ public class UserService {
 			log.error("Unexpected error updating profile for user: {} - Error: {}", email, e.getMessage(), e);
 			throw new RuntimeException("Failed to update user profile", e);
 		}
+	}
+
+	// ─────────────────────────────────────────
+	// POST /users/me/avatar
+	// ─────────────────────────────────────────
+	@Transactional
+	public UserProfileResponse updateAvatar(String email, MultipartFile file) throws IOException {
+		log.info("Updating avatar for user: {}", email);
+		
+		User user = userRepository.findByEmail(email)
+				.orElseThrow(() -> new RuntimeException("User not found"));
+		
+		String publicUrl = r2StorageService.uploadAvatar(file, user.getId());
+		
+		UserProfile profile = user.getProfile();
+		profile.setAvatarUrl(publicUrl);
+		userRepository.save(user);
+		
+		log.info("Avatar updated successfully for user: {}", email);
+		return getUserProfileResponse(user, profile);
 	}
 
 	// ─────────────────────────────────────────

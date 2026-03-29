@@ -39,7 +39,7 @@ public class JwtTokenProvider {
                 .signWith(accessKey);
 
         if (claims != null && !claims.isEmpty()) {
-            builder.claims(claims);
+            claims.forEach(builder::claim);
         }
 
         builder.claim("type", "access");
@@ -52,6 +52,7 @@ public class JwtTokenProvider {
                 .subject(username)
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + expiresIn))
+                .claim("type", "refresh")
                 .signWith(refreshKey)
                 .compact();
     }

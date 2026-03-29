@@ -46,4 +46,18 @@ public class UserController {
 		}
 	}
 
+	@PostMapping(value = "/avatar", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+	public ResponseEntity<UserProfileResponse> uploadAvatar(
+			@RequestHeader("X-User-Email") String email,
+			@RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+		log.info("Received profile avatar upload request for user: {}", email);
+		try {
+			UserProfileResponse response = userService.updateAvatar(email, file);
+			log.info("Avatar update completed successfully for user: {}", email);
+			return ResponseEntity.ok(response);
+		} catch (Exception e) {
+			log.error("Failed to upload avatar for user: {} - Error: {}", email, e.getMessage(), e);
+			throw new RuntimeException("Avatar upload failed", e);
+		}
+	}
 }
