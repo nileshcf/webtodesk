@@ -19,37 +19,27 @@ param(
     [switch]$Force,
     [switch]$NonInteractive,
     [switch]$OutputJson,
+    [switch]$OpenBrowser,
     [int]$HealthTimeoutSec = 90
 )
 
-function Write-Info {
-    param([string]$Message)
-    if (-not $OutputJson) {
-        Write-Host "[$((Get-Date).ToString('HH:mm:ss'))] $Message" -ForegroundColor Yellow
-    }
+# Import common utilities
+$utilitiesPath = Join-Path $PSScriptRoot ".windsurf/scripts/Common-Utilities.ps1"
+if (Test-Path $utilitiesPath) {
+    . $utilitiesPath
+    $script:OutputJson = $OutputJson
+} else {
+    throw "Required utilities module not found at $utilitiesPath"
 }
 
-function Write-Ok {
-    param([string]$Message)
-    if (-not $OutputJson) {
-        Write-Host "[OK] $Message" -ForegroundColor Green
-    }
-}
-
-function Write-Fail {
-    param([string]$Message)
-    if (-not $OutputJson) {
-        Write-Host "[ERROR] $Message" -ForegroundColor Red
-    }
-}
-
-function Confirm-Action {
-    param([string]$Prompt)
-    if ($Force -or $NonInteractive) {
-        return $true
-    }
-    return $PSCmdlet.ShouldContinue($Prompt, "Confirm")
-}
+$result = New-ScriptResult -ScriptName "registry-pull-run.ps1"
+$result.image = $null
+$result.container = $ContainerName
+$result.hostPort = $HostPort
+$result.healthy = $false
+$result.status = $null
+$result.envFileUsed = $null
+$result.tagIndexFile = $TagIndexFile
 
 function Get-TagHistory {
     param([string]$IndexPath)
@@ -201,79 +191,102 @@ $result = [ordered]@{
     tagIndexFile = $TagIndexFile
 }
 
-try {
+Invoke-WithErrorHandling -ScriptBlock {
+    Write-Step "Resolving image reference" -Step 1 -Total 6
+    
     $targetRepo = Resolve-TargetRepo
-    $indexPath = Join-Path $PSScriptRoot $TagIndexFile
+    $indexPath = Resolve-ScriptPath -RelativePath $TagIndexFile
     $tagHistory = Get-TagHistory -IndexPath $indexPath
     $repoHistory = if ($targetRepo) { Get-RepoHistory -Entries $tagHistory.images -Repo $targetRepo } else { @() }
-
+    
     if ($ListAvailableTags) {
         if (-not $targetRepo) {
             throw "-ListAvailableTags requires -RegistryRepo or -GitHubRepo"
         }
-
+        
+        Write-Host ""
+        Write-Host "Available versions for ${targetRepo}:" -ForegroundColor Cyan
         Show-TagTable -Entries $repoHistory
+        
         $result.success = $true
         $result.image = if ($repoHistory.Count -gt 0) { [string]$repoHistory[0].image } else { $null }
         $result.availableTags = @($repoHistory | ForEach-Object { [string]$_.versionTag })
         $result.tagIndexFile = $indexPath
-
-        if ($OutputJson) {
-            $result | ConvertTo-Json -Depth 6
-        }
+        
+        Export-ScriptResult -Result $Result -OutputJson:$OutputJson
         exit 0
     }
-
+    
     $imageRef = Resolve-ImageRef -TargetRepo $targetRepo -RepoHistory $repoHistory
     if (-not $imageRef) {
         throw "Image is required. Use -Image ghcr.io/<user-or-org>/webtodesk:latest or -GitHubRepo <user-or-org>/webtodesk [-Tag latest|-VersionTag vN|-SelectTag]"
     }
+    
     $result.image = $imageRef
     $result.tagIndexFile = $indexPath
-
-    Write-Info "Checking Docker availability"
-    $null = docker info 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    Write-Info "Image: $imageRef"
+    
+    # Docker verification
+    Write-Step "Verifying Docker" -Step 2 -Total 6
+    
+    if (-not (Test-DockerAvailable)) {
         throw "Docker is not running or not accessible"
     }
-    Write-Ok "Docker is available"
-
-    if ($PullAlways -or (Confirm-Action "Pull latest image '$imageRef' now?")) {
-        Write-Info "Pulling image '$imageRef'"
-        & docker pull $imageRef
-        if ($LASTEXITCODE -ne 0) {
-            throw "docker pull failed for '$imageRef'"
-        }
-        Write-Ok "Image pulled"
-    }
-
-    if ($StopExisting) {
-        Write-Info "Checking existing container '$ContainerName'"
-        $existing = docker ps -a --filter "name=$ContainerName" --format "{{.Names}}" 2>$null
-        if ($existing) {
-            if ($PSCmdlet.ShouldProcess($ContainerName, "docker stop/rm")) {
-                & docker stop $ContainerName 2>$null | Out-Null
-                & docker rm $ContainerName 2>$null | Out-Null
-                Write-Ok "Removed existing container '$ContainerName'"
+    Write-Success "Docker is available"
+    
+    # Pull image
+    Write-Step "Pulling image" -Step 3 -Total 6
+    
+    if ($PullAlways -or (Test-Confirmation -Prompt "Pull image '$imageRef' now?" -DefaultYes -Force:$Force -NonInteractive:$NonInteractive)) {
+        Write-Info "Pulling '$imageRef'..."
+        $pullTime = Measure-Command {
+            & docker pull $imageRef
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to pull '$imageRef'"
             }
         }
+        Write-Success "Image pulled in $($pullTime.ToString('mm\:ss'))"
+    } else {
+        Write-Info "Skipping pull (using local image if available)"
     }
-
-    $portInUse = Get-NetTCPConnection -LocalPort $HostPort -ErrorAction SilentlyContinue |
-        Where-Object { $_.State -eq "Listen" }
+    
+    # Handle existing container
+    Write-Step "Managing existing container" -Step 4 -Total 6
+    
+    if ($StopExisting) {
+        $containerStatus = Get-ContainerStatus -ContainerName $ContainerName
+        if ($containerStatus -ne "not_found") {
+            Write-Info "Removing existing container..."
+            & docker stop $ContainerName 2>$null | Out-Null
+            & docker rm $ContainerName 2>$null | Out-Null
+            Write-Success "Container removed"
+        }
+    }
+    
+    # Check port availability
+    $portInUse = Test-PortInUse -Port $HostPort
     if ($portInUse) {
         if ($KillPortProcess) {
             foreach ($p in $portInUse) {
-                if (Confirm-Action "Kill process PID $($p.OwningProcess) on port $HostPort?") {
+                $msg = "Kill process PID $($p.OwningProcess) on port $HostPort?"
+                if (Test-Confirmation -Prompt $msg -Force:$Force -NonInteractive:$NonInteractive) {
                     Stop-Process -Id $p.OwningProcess -Force -ErrorAction SilentlyContinue
+                    Write-Success "Killed process $($p.OwningProcess)"
                 }
             }
-        } elseif (-not (Confirm-Action "Host port $HostPort is in use. Continue anyway?")) {
-            throw "Host port $HostPort is already in use"
+        } else {
+            $msg = "Port $HostPort is in use. Continue anyway?"
+            if (-not (Test-Confirmation -Prompt $msg -DefaultYes -Force:$Force -NonInteractive:$NonInteractive)) {
+                throw "Host port $HostPort is already in use"
+            }
+            Write-Warning "Port $HostPort is in use - continuing anyway"
         }
     }
-
-    $envPath = Join-Path $PSScriptRoot $EnvFile
+    
+    # Run container
+    Write-Step "Starting container" -Step 5 -Total 6
+    
+    $envPath = Resolve-ScriptPath -RelativePath $EnvFile
     $runArgs = @(
         "run", "-d",
         "--name", $ContainerName,
@@ -283,68 +296,64 @@ try {
         "--ulimit", "nofile=65536:65536",
         "--tmpfs", "/tmp/webtodesk-builds:mode=1777,size=1500m,exec"
     )
-
+    
     if (Test-Path $envPath) {
         $runArgs += @("--env-file", $EnvFile)
         $result.envFileUsed = $EnvFile
-        Write-Info "Using env file '$EnvFile'"
+        Write-Info "Using env file: $EnvFile"
     } else {
-        Write-Info "No env file found at '$EnvFile' (continuing without --env-file)"
+        Write-Warning "No env file found at '$EnvFile'"
     }
-
+    
     $runArgs += $imageRef
-
-    Write-Info "Running: docker $($runArgs -join ' ')"
+    
+    Write-Info "Run command: docker $($runArgs -join ' ')"
     $containerId = (& docker @runArgs 2>$null).Trim()
     if ($LASTEXITCODE -ne 0 -or -not $containerId) {
         throw "Failed to start container from image '$imageRef'"
     }
-
-    $elapsed = 0
-    $healthy = $false
-    Write-Info "Waiting for health endpoint (up to ${HealthTimeoutSec}s)..."
-    while ($elapsed -lt $HealthTimeoutSec) {
-        Start-Sleep -Seconds 3
-        $elapsed += 3
-        try {
-            $resp = Invoke-WebRequest -Uri "http://localhost:$HostPort/" -TimeoutSec 3 -ErrorAction SilentlyContinue
-            if ($resp -and $resp.StatusCode -eq 200) {
-                $healthy = $true
-                break
-            }
-        } catch {}
-
-        if ($elapsed % 15 -eq 0) {
-            Write-Info "  Still waiting... (${elapsed}s)"
-        }
-    }
-
+    
+    Write-Success "Container started: $containerId"
+    
+    # Wait for health endpoint
+    Write-Step "Waiting for health endpoint" -Step 6 -Total 6
+    
+    $healthy = Wait-PortReady -Port $HostPort -TimeoutSec $HealthTimeoutSec -ServiceName "WebToDesk"
+    
+    # Get final status
     $status = docker ps --filter "id=$containerId" --format "{{.Status}}" 2>$null
-
-    $result.success = $true
+    
     $result.healthy = $healthy
     $result.status = $status
     $result.url = "http://localhost:$HostPort"
-
-    if ($OutputJson) {
-        $result | ConvertTo-Json -Depth 6
-    } else {
+    
+    # Show results
+    if (-not $OutputJson) {
+        Write-Host ""
+        Write-Host "Container Information:" -ForegroundColor Cyan
+        Write-Host "  URL:       http://localhost:$HostPort" -ForegroundColor White
+        Write-Host "  Image:     $imageRef" -ForegroundColor White
+        Write-Host "  Container: $ContainerName ($containerId)" -ForegroundColor White
+        Write-Host "  Status:    $status" -ForegroundColor White
+        Write-Host ""
+        Write-Host "Useful Commands:" -ForegroundColor Cyan
+        Write-Host "  View logs: docker logs -f $ContainerName" -ForegroundColor Gray
+        Write-Host "  Stop:      docker stop $ContainerName" -ForegroundColor Gray
+        Write-Host "  Remove:    docker rm $ContainerName" -ForegroundColor Gray
+        Write-Host ""
+        
         if ($healthy) {
-            Write-Ok "Container is healthy ($status)"
+            Write-Success "Application is ready!"
+            if ($OpenBrowser) {
+                Write-Info "Opening browser..."
+                Start-Process "http://localhost:$HostPort"
+            }
         } else {
-            Write-Info "Container is running but health endpoint is not ready yet"
+            Write-Warning "Application not yet ready - check logs"
         }
-        Write-Host "URL:  http://localhost:$HostPort" -ForegroundColor Cyan
-        Write-Host "Logs: docker logs -f $ContainerName" -ForegroundColor White
     }
+    
+} -Result $Result -ErrorMessage "Failed to pull and run container" -OutputJson:$OutputJson
 
-    exit 0
-}
-catch {
-    $result.error = $_.Exception.Message
-    Write-Fail $result.error
-    if ($OutputJson) {
-        $result | ConvertTo-Json -Depth 6
-    }
-    exit 1
-}
+Export-ScriptResult -Result $Result -OutputJson:$OutputJson
+exit 0

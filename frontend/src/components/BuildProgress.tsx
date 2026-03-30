@@ -49,7 +49,7 @@ export function BuildProgress({ projectId, onComplete, onFailed }: BuildProgress
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
-    fetchEventSource(`/conversion/conversions/${projectId}/build/stream`, {
+    const eventSource = fetchEventSource(`/conversion/conversions/${projectId}/build/stream`, {
       headers: { Authorization: `Bearer ${getAccessToken()}` },
       signal: ctrl.signal,
       onmessage(ev) {
@@ -68,18 +68,27 @@ export function BuildProgress({ projectId, onComplete, onFailed }: BuildProgress
             onFailed?.(data.error ?? data.message ?? 'Build failed');
             ctrl.abort();
           }
-        } catch {
-          // ignore parse errors
+        } catch (error) {
+          console.error('Failed to parse SSE message:', error);
         }
       },
-      onerror() {
-        // SSE connection dropped — stop retrying
+      onerror(error) {
+        console.error('SSE connection error:', error);
+        ctrl.abort();
+        onFailed?.('Connection lost');
+      },
+      onclose() {
+        // Connection closed normally
         ctrl.abort();
       },
     });
 
-    return () => ctrl.abort();
-  }, [projectId, onComplete, onFailed]);
+    return () => {
+      ctrl.abort();
+      // Ensure eventSource is properly cleaned up
+      eventSource?.close?.();
+    };
+  }, [projectId]); // Remove onComplete and onFailed from dependencies
 
   const stageIndex = STAGE_ORDER.indexOf(currentStage);
   const progressPct = done

@@ -1,6 +1,6 @@
-﻿# App-Level Documentation & Upskilling Update Brief
+# App-Level Documentation & Upskilling Update Brief
 
-Generated: 2026-03-30 00:06:13
+Generated: 2026-03-30 13:52:00
 Scope: update project documentation from latest code/runtime changes.
 
 ## Required output files
@@ -11,21 +11,35 @@ Scope: update project documentation from latest code/runtime changes.
 
 ## Source change inventory
 
-### frontend
-- [M] frontend/src/hooks/useAuth.tsx (commit)
-- [M] frontend/src/pages/LoginPage.tsx (commit)
-- [M] frontend/src/pages/RegisterPage.tsx (commit)
-- [M] frontend/src/services/api.ts (commit)
+### conversion-service
+- [M] conversion-service/pom.xml (working)
+- [M] conversion-service/src/main/java/com/example/conversion_service/filter/RequestLoggingFilter.java (working)
 
 ### root/other
-- [M] .ai/app-doc-update-brief.md (commit)
+- [??] .windsurf/ (working)
+- [??] ai-doc-sync.ps1 (working)
+- [??] git-operations.ps1 (working)
+- [M] pom.xml (working)
+- [??] registry-pull-run.ps1 (working)
+- [??] registry-push.ps1 (working)
+- [D] scripts/.ai/app-doc-update-brief.md (working)
+- [D] scripts/.registry-image-tags.json (working)
+- [D] scripts/ai-doc-sync.ps1 (working)
+- [D] scripts/git-operations.ps1 (working)
+- [D] scripts/registry-pull-run.ps1 (working)
+- [D] scripts/registry-push.ps1 (working)
+- [D] scripts/test-build.ps1 (working)
+- [??] test-build.ps1 (working)
 
 ### runtime/deploy
-- [M] Dockerfile (commit)
+- [??] docker-rebuild.ps1 (working)
+- [??] docker-start.ps1 (working)
+- [D] scripts/docker-rebuild.ps1 (working)
+- [D] scripts/docker-start.ps1 (working)
 
 ### user-service
-- [M] user-service/src/main/java/com/example/user_service/config/FirebaseConfig.java (commit)
-- [M] user-service/src/main/java/com/example/user_service/service/AuthService.java (commit)
+- [M] user-service/pom.xml (working)
+- [M] user-service/src/main/java/com/example/user_service/filter/RequestLoggingFilter.java (working)
 
 ## Update rules
 1. Reflect implemented behavior only; mark roadmap/deferred items clearly.

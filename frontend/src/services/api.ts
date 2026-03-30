@@ -40,15 +40,33 @@ function clearTokens() {
 }
 
 function scheduleRefresh(expiresInSeconds: number) {
-  if (refreshTimer) clearTimeout(refreshTimer);
+  // Clear any existing timer
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+  
+  // Only schedule if not already refreshing
+  if (isRefreshing) {
+    return;
+  }
+  
   // Refresh 60 seconds before expiry
   const delay = Math.max((expiresInSeconds - 60) * 1000, 10000);
   refreshTimer = setTimeout(async () => {
     try {
+      isRefreshing = true;
       await authApi.refresh();
-    } catch {
+    } catch (error) {
+      console.error('Token refresh failed:', error);
       clearTokens();
-      window.location.href = '/login';
+      // Only redirect if we're in a browser environment
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
+    } finally {
+      isRefreshing = false;
+      refreshTimer = null;
     }
   }, delay);
 }
@@ -65,6 +83,16 @@ api.interceptors.request.use((config) => {
 // Avoid infinite refresh loops
 let isRefreshing = false;
 let failedQueue: Array<{ resolve: (token: string | null) => void, reject: (err: any) => void }> = [];
+
+// Clear refresh timer when page unloads
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    if (refreshTimer) {
+      clearTimeout(refreshTimer);
+      refreshTimer = null;
+    }
+  });
+}
 
 const processQueue = (error: any, token: string | null = null) => {
   failedQueue.forEach(prom => {
@@ -294,7 +322,29 @@ export const conversionApi = {
 
   async userBuildHistory(limit = 10) {
     const res = await api.get(`/conversion/build/metrics?period=month`);
-    return res.data as { recentBuilds: any[]; queueStats: any };
+    return res.data as {
+      recentBuilds: Array<{
+        id: string;
+        projectId: string;
+        projectName: string;
+        userEmail: string;
+        tier: string;
+        result: string;
+        buildError?: string;
+        artifactUrl?: string;
+        buildTarget: string;
+        enabledModules: string[];
+        startedAt: string;
+        completedAt: string;
+        durationMs: number;
+      }>;
+      queueStats: {
+        normalQueueLength: number;
+        priorityQueueLength: number;
+        averageWaitTime: number;
+        estimatedPosition: number;
+      };
+    };
   },
 
   async getStats(): Promise<ConversionStats> {

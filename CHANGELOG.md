@@ -4,6 +4,32 @@ All notable changes to this project are documented in this file.
 
 ---
 
+## [1.8.1] - 2026-03-30 — Maven Configuration Centralization & Security Hardening
+
+### Overview
+
+Centralized all Maven dependency management in the root pom.xml to eliminate version conflicts and ensure consistency across modules. Fixed critical security vulnerabilities in RequestLoggingFilter including log injection prevention and proper client IP detection behind proxies. Resolved MDC resource leaks that could cause memory issues in thread pool environments.
+
+### Fixed
+
+- **Maven Configuration**: 
+  - Centralized dependency versions in root `pom.xml` with properties for `lombok.version`, `aws-sdk.version`, `firebase.version`, `mustache.version`, and `springdoc.version`
+  - Added `dependencyManagement` entries for all previously hardcoded dependencies
+  - Added `pluginManagement` for `spring-boot-maven-plugin` with `${spring-boot.version}`
+  - Removed duplicate `maven-compiler-plugin` from `user-service` (now inherits from root)
+  - Fixed Lombok version inconsistency (was 1.18.34 in user-service, now 1.18.30 everywhere)
+
+- **Security Vulnerabilities**:
+  - **RequestLoggingFilter** (both services): Fixed client IP detection to properly handle `X-Forwarded-For` and `X-Real-IP` headers instead of always returning proxy IP
+  - **RequestLoggingFilter**: Added email sanitization to prevent log injection attacks (removes newlines, tabs, and control characters)
+  - **RequestLoggingFilter**: Fixed MDC resource leak by using `MDC.MDCCloseable` with try-with-resources for automatic cleanup
+
+- **Performance Optimizations**:
+  - **RequestLoggingFilter**: Replaced string concatenation with `StringBuilder` for efficient query string handling
+  - Added null safety for UUID truncation to prevent potential `StringIndexOutOfBoundsException`
+
+---
+
 ## [1.8.0] - 2026-03-30 — Premium Frontend UI Overhaul & Scripts Organization
 
 ### Overview

@@ -157,16 +157,49 @@ function Invoke-GitForcePull {
 }
 
 function Invoke-GitPush {
-    Invoke-GitCommand -Arguments @("push") | Out-Null
-    Write-Ok "Push completed"
+    param([string]$Branch)
+    
+    # Check if branch has upstream
+    $upstream = git rev-parse --abbrev-ref "@{u}" 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $upstream) {
+        # No upstream set, push with --set-upstream
+        Write-Info "No upstream configured. Setting upstream and pushing..."
+        & git push --set-upstream origin $Branch
+    } else {
+        # Has upstream, normal push
+        & git push
+    }
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Ok "Push completed"
+    } else {
+        throw "git push failed"
+    }
 }
 
 function Invoke-GitForcePush {
+    param([string]$Branch)
+    
     if (-not (Confirm-Action "Force push overwrites remote history. Continue?")) {
         throw "Force push canceled"
     }
-    Invoke-GitCommand -Arguments @("push", "--force-with-lease") | Out-Null
-    Write-Ok "Force push completed"
+    
+    # Check if branch has upstream
+    $upstream = git rev-parse --abbrev-ref "@{u}" 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $upstream) {
+        # No upstream set, push with --set-upstream
+        Write-Info "No upstream configured. Setting upstream and force pushing..."
+        & git push --set-upstream --force-with-lease origin $Branch
+    } else {
+        # Has upstream, normal force push
+        & git push --force-with-lease
+    }
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Ok "Force push completed"
+    } else {
+        throw "git force push failed"
+    }
 }
 
 function Invoke-GitMerge {
@@ -294,8 +327,8 @@ try {
             "new-branch" { New-GitBranch -Name $Branch; $result.details = @{ branch = $Branch } }
             "pull" { Invoke-GitPull }
             "force-pull" { Invoke-GitForcePull }
-            "push" { Invoke-GitPush }
-            "force-push" { Invoke-GitForcePush }
+            "push" { Invoke-GitPush -Branch $Branch }
+            "force-push" { Invoke-GitForcePush -Branch $Branch }
             "merge" {
                 $branchToMerge = if ($TargetBranch) { $TargetBranch } else { $Branch }
                 Invoke-GitMerge -Name $branchToMerge

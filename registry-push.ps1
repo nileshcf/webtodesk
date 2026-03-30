@@ -2,7 +2,7 @@
 param(
     [string]$RegistryRepo,
     [string]$HubRepo,
-    [string]$GitHubRepo = "thecheesybit/webtodesk",
+    [string]$GitHubRepo = "nileshcf/webtodesk",
     [string]$Registry = "ghcr.io",
     [string]$EnvFile = ".env",
     [string]$PatEnvVarName = "PAT_DOCKER_GIT",
@@ -24,34 +24,25 @@ param(
     [switch]$OutputJson
 )
 
-function Write-Info {
-    param([string]$Message)
-    if (-not $OutputJson) {
-        Write-Host "[$((Get-Date).ToString('HH:mm:ss'))] $Message" -ForegroundColor Yellow
-    }
+# Import common utilities
+$utilitiesPath = Join-Path $PSScriptRoot ".windsurf/scripts/Common-Utilities.ps1"
+if (Test-Path $utilitiesPath) {
+    . $utilitiesPath
+    $script:OutputJson = $OutputJson
+} else {
+    throw "Required utilities module not found at $utilitiesPath"
 }
 
-function Write-Ok {
-    param([string]$Message)
-    if (-not $OutputJson) {
-        Write-Host "[OK] $Message" -ForegroundColor Green
-    }
-}
-
-function Write-Fail {
-    param([string]$Message)
-    if (-not $OutputJson) {
-        Write-Host "[ERROR] $Message" -ForegroundColor Red
-    }
-}
-
-function Confirm-Action {
-    param([string]$Prompt)
-    if ($Force -or $NonInteractive) {
-        return $true
-    }
-    return $PSCmdlet.ShouldContinue($Prompt, "Confirm")
-}
+$result = New-ScriptResult -ScriptName "registry-push.ps1"
+$result.sourceImage = $SourceImage
+$result.registryRepo = $null
+$result.baseTag = $Tag
+$result.extraTags = $ExtraTags
+$result.versionTag = $null
+$result.tagIndexFile = $TagIndexFile
+$result.buildFirst = [bool]$BuildFirst
+$result.pushedImages = @()
+$result.loginMode = $null
 
 function Resolve-TargetRepo {
     if ($RegistryRepo) {
@@ -236,35 +227,47 @@ $result = [ordered]@{
     loginMode = $null
 }
 
-try {
+Invoke-WithErrorHandling -ScriptBlock {
+    Write-Step "Resolving target repository" -Step 1 -Total 7
+    
     $targetRepo = Resolve-TargetRepo
     if (-not $targetRepo) {
         throw "Repo is required. Use -RegistryRepo ghcr.io/<user-or-org>/webtodesk or -GitHubRepo <user-or-org>/webtodesk"
     }
     $result.registryRepo = $targetRepo
-
-    $indexPath = Join-Path $PSScriptRoot $TagIndexFile
+    Write-Info "Target repository: $targetRepo"
+    
+    # Setup version tagging
+    Write-Step "Configuring version tags" -Step 2 -Total 7
+    
+    $indexPath = Resolve-ScriptPath -RelativePath $TagIndexFile
     $tagHistory = Get-TagHistory -IndexPath $indexPath
     $resolvedVersionTag = if ($VersionTag) { $VersionTag.Trim() } else { Get-NextVersionTag -Entries $tagHistory.images -Repo $targetRepo }
+    
     if (-not $resolvedVersionTag -or $resolvedVersionTag -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
         throw "Invalid version tag '$resolvedVersionTag'. Use letters, numbers, dot, underscore, and hyphen."
     }
+    
     $result.versionTag = $resolvedVersionTag
     $result.tagIndexFile = $indexPath
-
-    $registryHost = Resolve-RegistryHost -Repo $targetRepo
-
-    Write-Info "Checking Docker availability"
-    $null = docker info 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    Write-Info "Version tag: $resolvedVersionTag"
+    
+    # Docker verification
+    Write-Step "Verifying Docker" -Step 3 -Total 7
+    
+    if (-not (Test-DockerAvailable)) {
         throw "Docker is not running or not accessible"
     }
-    Write-Ok "Docker is available"
-
+    Write-Success "Docker is available"
+    
+    # Enable BuildKit
     $env:DOCKER_BUILDKIT = "1"
     $env:COMPOSE_DOCKER_CLI_BUILD = "1"
-
+    
+    # Build if requested
     if ($BuildFirst) {
+        Write-Step "Building Docker image" -Step 4 -Total 7
+        
         $buildArgs = @("compose", "build")
         if ($NoCache) { $buildArgs += "--no-cache" }
         $buildArgs += @(
@@ -272,91 +275,103 @@ try {
             "--build-arg", "ELECTRON_VERSION=$ElectronVersion",
             "--build-arg", "ELECTRON_BUILDER_VERSION=$ElectronBuilderVersion"
         )
-
-        Write-Info "Running: docker $($buildArgs -join ' ')"
+        
+        Write-Info "Build command: docker $($buildArgs -join ' ')"
         & docker @buildArgs
         if ($LASTEXITCODE -ne 0) {
-            throw "docker compose build failed"
+            throw "Docker build failed"
         }
-        Write-Ok "Build completed"
+        Write-Success "Build completed"
     }
-
-    $sourceExists = docker images --format "{{.Repository}}:{{.Tag}}" 2>$null |
-        Where-Object { $_ -eq $SourceImage }
-    if (-not $sourceExists) {
-        throw "Source image '$SourceImage' not found. Build first or pass correct -SourceImage"
+    
+    # Verify source image exists
+    Write-Step "Verifying source image" -Step 5 -Total 7
+    
+    if (-not (Get-DockerImageExists -ImageName $SourceImage)) {
+        throw "Source image '$SourceImage' not found. Build first or specify correct -SourceImage"
     }
-
+    Write-Success "Source image found: $SourceImage"
+    
+    # Registry login if needed
+    $registryHost = Resolve-RegistryHost -Repo $targetRepo
     if ($RunLogin) {
-        if (-not (Confirm-Action "Run docker login for '$registryHost' now?")) {
-            throw "docker login canceled"
+        Write-Step "Registry authentication" -Step 6 -Total 7
+        
+        if (-not (Test-Confirmation -Prompt "Run docker login for '$registryHost' now?" -Force:$Force -NonInteractive:$NonInteractive)) {
+            throw "Docker login canceled"
         }
-
+        
+        # Try to get token from environment or .env file
         $token = [Environment]::GetEnvironmentVariable($PatEnvVarName)
         if (-not $token) {
-            $envPath = Join-Path $PSScriptRoot $EnvFile
+            $envPath = Resolve-ScriptPath -RelativePath $EnvFile
             $token = Get-EnvValueFromDotEnv -FilePath $envPath -Key $PatEnvVarName
         }
-
+        
         $loginUser = Resolve-RegistryUsername -Repo $targetRepo -RegistryHost $registryHost -ExplicitUsername $RegistryUsername
-
+        
         if ($token -and $loginUser) {
-            Write-Info "Using token from '$PatEnvVarName' for registry login"
+            Write-Info "Using token from '$PatEnvVarName'"
             $token | docker login $registryHost -u $loginUser --password-stdin
-            if ($LASTEXITCODE -ne 0) {
-                throw "docker login failed using token from '$PatEnvVarName'"
+            if ($LASTEXITCODE -eq 0) {
+                $result.loginMode = "token:$PatEnvVarName"
+                Write-Success "Login successful"
+            } else {
+                throw "Docker login failed using token"
             }
-            $result.loginMode = "token:$PatEnvVarName"
         } else {
-            if (-not $token) {
-                Write-Info "No '$PatEnvVarName' found in process env or '$EnvFile'; using interactive login"
-            } elseif (-not $loginUser) {
-                Write-Info "Could not infer registry username; using interactive login"
-            }
-
+            Write-Info "No token found, using interactive login"
             & docker login $registryHost
-            if ($LASTEXITCODE -ne 0) {
-                throw "docker login failed"
+            if ($LASTEXITCODE -eq 0) {
+                $result.loginMode = "interactive"
+                Write-Success "Login successful"
+            } else {
+                throw "Docker login failed"
             }
-            $result.loginMode = "interactive"
         }
-        Write-Ok "docker login completed for '$registryHost'"
     }
-
+    
+    # Tag and push images
+    Write-Step "Tagging and pushing images" -Step 7 -Total 7
+    
     $aliasTags = @($Tag) + @($ExtraTags | Where-Object { $_ -and $_.Trim() })
     $allTags = @($resolvedVersionTag) + @($aliasTags) | Where-Object { $_ -and $_.Trim() } | Select-Object -Unique
-
+    
+    Write-Info "Tags to push: $($allTags -join ', ')"
+    
     foreach ($itemTag in $allTags) {
         $targetImage = "${targetRepo}:$itemTag"
-
-        Write-Info "Tagging '$SourceImage' as '$targetImage'"
+        
+        # Tag the image
+        Write-Info "Tagging as '$targetImage'"
         & docker tag $SourceImage $targetImage
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to tag image '$targetImage'"
         }
-
-        if (-not (Confirm-Action "Push image '$targetImage' to registry?")) {
-            Write-Info "Skipped push for '$targetImage'"
-            continue
-        }
-
-        if ($PSCmdlet.ShouldProcess($targetImage, "docker push")) {
-            Write-Info "Pushing '$targetImage'"
+        
+        # Push the image
+        $msg = "Push '$targetImage' to registry?"
+        if (Test-Confirmation -Prompt $msg -Force:$Force -NonInteractive:$NonInteractive) {
+            Write-Info "Pushing '$targetImage'..."
             & docker push $targetImage
             if ($LASTEXITCODE -ne 0) {
                 throw "Failed to push '$targetImage'"
             }
             $result.pushedImages += $targetImage
-            Write-Ok "Pushed '$targetImage'"
+            Write-Success "Pushed: $targetImage"
+        } else {
+            Write-Warning "Skipped: $targetImage"
         }
     }
-
+    
     if ($result.pushedImages.Count -eq 0) {
         throw "No images were pushed"
     }
-
+    
+    # Save to tag history
     $versionImage = "${targetRepo}:$resolvedVersionTag"
     $digest = Get-RepoDigest -ImageRef $versionImage
+    
     $historyEntry = [ordered]@{
         repo = $targetRepo
         versionTag = $resolvedVersionTag
@@ -367,33 +382,29 @@ try {
         createdAtUtc = (Get-Date).ToUniversalTime().ToString("o")
         notes = $Notes
     }
+    
     $tagHistory.images = @($tagHistory.images) + @($historyEntry)
     Save-TagHistory -IndexPath $indexPath -History $tagHistory
     $result.historyEntry = $historyEntry
-
-    $result.success = $true
-
-    if ($OutputJson) {
-        $result | ConvertTo-Json -Depth 6
-    } else {
-        Write-Host "" 
-        Write-Host "Published version: $resolvedVersionTag" -ForegroundColor Cyan
+    
+    # Show results
+    if (-not $OutputJson) {
+        Write-Host ""
+        Write-Host "Publish Summary:" -ForegroundColor Cyan
+        Write-Host "  Version:    $resolvedVersionTag" -ForegroundColor White
+        Write-Host "  Repository: $targetRepo" -ForegroundColor White
+        Write-Host "  Images:     $($result.pushedImages.Count) pushed" -ForegroundColor White
         if ($digest) {
-            Write-Host "Digest: $digest" -ForegroundColor White
+            Write-Host "  Digest:     $digest" -ForegroundColor Gray
         }
-        Write-Host "Tag index: $indexPath" -ForegroundColor White
-        Write-Host "Pull/run script for testers:" -ForegroundColor Cyan
-        Write-Host "  .\registry-pull-run.ps1 -GitHubRepo $($targetRepo -replace '^ghcr\.io/', '') -VersionTag $resolvedVersionTag -StopExisting" -ForegroundColor White
-        Write-Host "  .\registry-pull-run.ps1 -GitHubRepo $($targetRepo -replace '^ghcr\.io/', '') -ListAvailableTags" -ForegroundColor White
+        Write-Host ""
+        Write-Host "Pull Commands:" -ForegroundColor Cyan
+        Write-Host "  .\registry-pull-run.ps1 -GitHubRepo $($targetRepo -replace '^ghcr\.io/', '') -VersionTag $resolvedVersionTag" -ForegroundColor Gray
+        Write-Host "  .\registry-pull-run.ps1 -GitHubRepo $($targetRepo -replace '^ghcr\.io/', '') -ListAvailableTags" -ForegroundColor Gray
+        Write-Host ""
     }
+    
+} -Result $Result -ErrorMessage "Registry push failed" -OutputJson:$OutputJson
 
-    exit 0
-}
-catch {
-    $result.error = $_.Exception.Message
-    Write-Fail $result.error
-    if ($OutputJson) {
-        $result | ConvertTo-Json -Depth 6
-    }
-    exit 1
-}
+Export-ScriptResult -Result $Result -OutputJson:$OutputJson
+exit 0
