@@ -39,6 +39,54 @@ public class ModuleRegistry {
                 "badge", "Badge Count",
                 "Set dock/taskbar badge counter via IPC from the renderer",
                 LicenseTier.TRIAL, "modules/badge.mustache"));
+        m.put("domain-lock", new ModuleDefinition(
+                "domain-lock", "Domain Lock",
+                "Restrict navigation to allowed domains and block specified destinations",
+                LicenseTier.TRIAL, "modules/domain-lock.mustache"));
+        m.put("title-bar", new ModuleDefinition(
+                "title-bar", "Title Bar",
+                "Set a custom window title that persists across page navigations",
+                LicenseTier.TRIAL, "modules/title-bar.mustache"));
+        m.put("watermark", new ModuleDefinition(
+                "watermark", "Watermark Badge",
+                "Persistent badge near window controls showing trial status and days remaining",
+                LicenseTier.TRIAL, "modules/watermark.mustache"));
+        m.put("expiry", new ModuleDefinition(
+                "expiry", "Trial Expiry",
+                "Locks the app with a full-screen overlay after a specified expiry timestamp",
+                LicenseTier.TRIAL, "modules/expiry.mustache"));
+        m.put("notifications", new ModuleDefinition(
+                "notifications", "Native Notifications",
+                "Grants the Notification permission so the website's Web Notifications API works natively",
+                LicenseTier.STARTER, "modules/notifications.mustache"));
+        m.put("system-tray", new ModuleDefinition(
+                "system-tray", "System Tray",
+                "Adds a tray icon with configurable tooltip and context menu items",
+                LicenseTier.STARTER, "modules/system-tray.mustache"));
+        m.put("dark-mode", new ModuleDefinition(
+                "dark-mode", "Dark / Light Mode Sync",
+                "Syncs the OS dark/light theme to the web content via IPC and CSS class injection",
+                LicenseTier.STARTER, "modules/dark-mode.mustache"));
+        m.put("right-click", new ModuleDefinition(
+                "right-click", "Right-Click Control",
+                "Suppresses or replaces the browser context menu with a minimal native menu",
+                LicenseTier.STARTER, "modules/right-click.mustache"));
+        m.put("auto-update", new ModuleDefinition(
+                "auto-update", "Auto-Update",
+                "Configures electron-updater to check for and silently install new versions",
+                LicenseTier.STARTER, "modules/auto-update.mustache"));
+        m.put("key-bindings", new ModuleDefinition(
+                "key-bindings", "Custom Key Bindings",
+                "Registers configurable in-app keyboard shortcuts (reload, back, forward, fullscreen, etc.)",
+                LicenseTier.STARTER, "modules/key-bindings.mustache"));
+        m.put("window-polish", new ModuleDefinition(
+                "window-polish", "Window Polish",
+                "Applies visual enhancements: acrylic/vibrancy blur, always-on-top, opacity",
+                LicenseTier.STARTER, "modules/window-polish.mustache"));
+        m.put("clipboard", new ModuleDefinition(
+                "clipboard", "Clipboard Integration",
+                "Exposes secure clipboard read/write to the renderer via a contextBridge IPC bridge",
+                LicenseTier.STARTER, "modules/clipboard.mustache"));
         m.put("screen-protect", new ModuleDefinition(
                 "screen-protect", "Screen Protection",
                 "OS-level content protection to prevent screenshots and recordings",

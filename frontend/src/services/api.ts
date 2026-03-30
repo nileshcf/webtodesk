@@ -2,7 +2,7 @@ import axios from 'axios';
 import type {
   LoginRequest, SignupRequest, AuthTokens, ConversionProject,
   CreateConversionRequest, ElectronConfig, BuildStatusResponse,
-  User, UserProfileDetails, UpdateProfileRequest
+  User, UserProfileDetails, UpdateProfileRequest, ConversionStats
 } from '../types';
 
 const api = axios.create({
@@ -137,6 +137,12 @@ export const authApi = {
     return res.data;
   },
 
+  async googleAuth(idToken: string): Promise<AuthTokens> {
+    const res = await api.post<AuthTokens>('/user/auth/google', { idToken });
+    saveTokens(res.data);
+    return res.data;
+  },
+
   async refresh(): Promise<void> {
     const refreshToken = getRefreshToken();
     if (!refreshToken) throw new Error('No refresh token');
@@ -163,6 +169,15 @@ export const authApi = {
 
   async updateProfile(data: UpdateProfileRequest): Promise<UserProfileDetails> {
     const res = await api.put<UserProfileDetails>('/user/me', data);
+    return res.data;
+  },
+
+  async uploadAvatar(file: File): Promise<UserProfileDetails> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await api.post<UserProfileDetails>('/user/me/avatar', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
     return res.data;
   },
 
@@ -280,5 +295,10 @@ export const conversionApi = {
   async userBuildHistory(limit = 10) {
     const res = await api.get(`/conversion/build/metrics?period=month`);
     return res.data as { recentBuilds: any[]; queueStats: any };
+  },
+
+  async getStats(): Promise<ConversionStats> {
+    const res = await api.get<ConversionStats>('/conversion/conversions/stats');
+    return res.data;
   },
 };

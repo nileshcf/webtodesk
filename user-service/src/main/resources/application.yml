@@ -18,4 +18,18 @@ spring:
 eureka:
   client:
     service-url:
-      defaultZone: http://localhost:8761/eureka/
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+
+firebase:
+  credentials:
+    base64: ${FIREBASE_CREDENTIALS_BASE64:}
+
+webtodesk:
+  r2:
+    enabled: ${R2_ENABLED:true}
+    account-id: ${R2_ACCOUNT_ID}
+    access-key-id: ${R2_ACCESS_KEY_ID}
+    secret-access-key: ${R2_SECRET_ACCESS_KEY}
+    bucket: ${R2_BUCKET:webtodesk-builds}
+    public-url: ${R2_PUBLIC_URL:https://pub-1b61d73b19424844a83d743c392ddea5.r2.dev}
+    endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com

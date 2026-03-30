@@ -41,6 +41,7 @@ export interface ConversionProject {
   updatedAt: string;
   enabledModules?: string[];
   targetPlatform?: string;
+  moduleConfig?: ModuleConfig;
 }
 
 export interface BuildStatusResponse {
@@ -53,6 +54,76 @@ export interface BuildStatusResponse {
   updatedAt: string | null;
 }
 
+export interface DomainLockConfig {
+  allowedDomains?: string[];
+  blockedDomains?: string[];
+  blockMessage?: string;
+  allowExternalInBrowser?: boolean;
+}
+
+export interface TitleBarConfig {
+  text?: string;
+  overlayColor?: string;
+  symbolColor?: string;
+  overlayHeight?: number;
+}
+
+export interface WatermarkConfig {
+  text?: string;
+  position?: string;
+  showDaysRemaining?: boolean;
+  badgeColor?: string;
+  textColor?: string;
+  opacity?: number;
+}
+
+export interface ExpiryConfig {
+  expiresAt?: string;
+  lockMessage?: string;
+  upgradeUrl?: string;
+}
+
+export interface SystemTrayConfig {
+  tooltip?: string;
+  items?: Array<{ label?: string; action?: string; type?: string }>;
+}
+
+export interface RightClickConfig {
+  disable?: boolean;
+}
+
+export interface AutoUpdateConfig {
+  feedUrl?: string;
+}
+
+export interface KeyBindingsConfig {
+  bindings?: Array<{ accelerator?: string; action?: string }>;
+}
+
+export interface WindowPolishConfig {
+  blur?: boolean;
+  alwaysOnTop?: boolean;
+  opacity?: number;
+}
+
+export interface ClipboardConfig {
+  allowRead?: boolean;
+  allowWrite?: boolean;
+}
+
+export interface ModuleConfig {
+  domainLock?: DomainLockConfig;
+  titleBar?: TitleBarConfig;
+  watermark?: WatermarkConfig;
+  expiry?: ExpiryConfig;
+  systemTray?: SystemTrayConfig;
+  rightClick?: RightClickConfig;
+  autoUpdate?: AutoUpdateConfig;
+  keyBindings?: KeyBindingsConfig;
+  windowPolish?: WindowPolishConfig;
+  clipboard?: ClipboardConfig;
+}
+
 export interface CreateConversionRequest {
   projectName: string;
   websiteUrl: string;
@@ -60,6 +131,7 @@ export interface CreateConversionRequest {
   iconFile?: string;
   enabledModules?: string[];
   targetPlatform?: string;
+  moduleConfig?: ModuleConfig;
 }
 
 export interface ElectronConfig {
@@ -80,6 +152,22 @@ export interface UserProfileDetails {
   emailVerified: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export type LicenseTier = 'TRIAL' | 'STARTER' | 'PRO' | 'LIFETIME';
+
+export interface ConversionStats {
+  userEmail: string;
+  totalProjects: number;
+  draftProjects: number;
+  readyProjects: number;
+  buildingProjects: number;
+  failedProjects: number;
+  totalBuilds: number;
+  buildsAllowed: number;
+  buildsRemaining: number;
+  tier: LicenseTier;
+  licenseExpiresAt: string | null;
 }
 
 export interface UpdateProfileRequest {

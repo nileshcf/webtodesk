@@ -1,0 +1,21 @@
+// Module: notifications — Tier: STARTER
+// Grants the Notification permission so the website's Web Notifications API works natively.
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('notifications')) return;
+
+  const { session } = require('electron');
+
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    callback(permission === 'notifications');
+  });
+
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+    return permission === 'notifications';
+  });
+}
+
+function preloadSetup() {}
+
+function teardown() {}
+
+module.exports = { setup, preloadSetup, teardown };

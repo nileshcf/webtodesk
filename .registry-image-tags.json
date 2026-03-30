@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "images": [
+    {
+      "repo": "ghcr.io/thecheesybit/webtodesk-release",
+      "versionTag": "mvp-module-integrated",
+      "image": "ghcr.io/thecheesybit/webtodesk-release:mvp-module-integrated",
+      "sourceImage": "webtodesk-webtodesk:latest",
+      "pushedTags": [
+        "mvp-module-integrated",
+        "latest"
+      ],
+      "digest": "sha256:617fea6eb1f508ba97ae420b026bc85a20fd1f33a831ebed1720848e763b7107",
+      "createdAtUtc": "2026-03-29T15:32:17.5001157Z",
+      "notes": ""
+    }
+  ]
+}

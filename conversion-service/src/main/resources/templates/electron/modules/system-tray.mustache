@@ -1,0 +1,60 @@
+// Module: system-tray — Tier: STARTER
+// Adds a system tray icon with configurable tooltip and context menu.
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('system-tray')) return;
+
+  const { Tray, Menu, app, nativeImage } = require('electron');
+  const path = require('path');
+
+  const {
+    tooltip = config.appTitle || 'App',
+    items = []
+  } = config.systemTray || {};
+
+  let tray;
+  try {
+    const iconPath = path.join(__dirname, config.iconFile || 'icon.ico');
+    tray = new Tray(iconPath);
+  } catch (_) {
+    tray = new Tray(nativeImage.createEmpty());
+  }
+
+  tray.setToolTip(tooltip);
+
+  const builtItems = [
+    {
+      label: 'Show',
+      click: () => { mainWindow.show(); mainWindow.focus(); }
+    },
+    { type: 'separator' },
+    ...items
+      .filter(i => i && (i.type === 'separator' || i.label))
+      .map(i => {
+        if (i.type === 'separator') return { type: 'separator' };
+        return {
+          label: i.label,
+          click: () => {
+            if      (i.action === 'quit')   app.quit();
+            else if (i.action === 'reload') mainWindow.reload();
+            else if (i.action === 'toggle') {
+              mainWindow.isVisible() ? mainWindow.hide() : mainWindow.show();
+            } else {
+              mainWindow.show(); mainWindow.focus();
+            }
+          }
+        };
+      }),
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() }
+  ];
+
+  const menu = Menu.buildFromTemplate(builtItems);
+  tray.setContextMenu(menu);
+  tray.on('double-click', () => { mainWindow.show(); mainWindow.focus(); });
+}
+
+function preloadSetup() {}
+
+function teardown() {}
+
+module.exports = { setup, preloadSetup, teardown };

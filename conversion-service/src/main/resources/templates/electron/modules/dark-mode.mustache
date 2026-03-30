@@ -1,0 +1,35 @@
+// Module: dark-mode — Tier: STARTER
+// Syncs the OS dark/light mode to the web content via IPC + CSS class injection.
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('dark-mode')) return;
+
+  const { nativeTheme, ipcMain } = require('electron');
+
+  function sendTheme() {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('wtd-theme-changed', {
+        isDark: nativeTheme.shouldUseDarkColors
+      });
+    }
+  }
+
+  nativeTheme.on('updated', sendTheme);
+  mainWindow.webContents.on('did-finish-load', sendTheme);
+
+  ipcMain.handle('wtd-get-theme', () => ({
+    isDark: nativeTheme.shouldUseDarkColors
+  }));
+}
+
+function preloadSetup(contextBridge, ipcRenderer, config) {
+  if (!config.modules?.includes('dark-mode')) return;
+
+  contextBridge.exposeInMainWorld('wtdTheme', {
+    get: () => ipcRenderer.invoke('wtd-get-theme'),
+    onChange: (cb) => ipcRenderer.on('wtd-theme-changed', (_, data) => cb(data))
+  });
+}
+
+function teardown() {}
+
+module.exports = { setup, preloadSetup, teardown };

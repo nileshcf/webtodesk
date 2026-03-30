@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { User, Phone, Image, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { User, Phone, Image, AlertCircle, CheckCircle2, Loader2, Camera } from 'lucide-react';
 import { authApi } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import type { UpdateProfileRequest, UserProfileDetails } from '../types';
@@ -12,6 +12,9 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState({
     username: '',
@@ -75,6 +78,26 @@ export default function SettingsPage() {
     }
   };
 
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingAvatar(true);
+    setError('');
+    
+    try {
+      const profile = await authApi.uploadAvatar(file);
+      setForm(f => ({ ...f, avatarUrl: profile.avatarUrl || '' }));
+      setSuccess(true);
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Failed to upload avatar.');
+    } finally {
+      setUploadingAvatar(false);
+      // Reset input so the same file can be uploaded again if needed
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center px-6 pt-24 pb-16">
       <motion.div
@@ -117,19 +140,36 @@ export default function SettingsPage() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="text-xs text-white/40 mb-1.5 block">Username</label>
-                <div className="relative">
-                  <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
-                  <input
-                    type="text"
-                    value={form.username}
-                    onChange={handleChange('username')}
-                    placeholder="johndoe"
-                    className="input-field pl-10"
-                    required
-                  />
+              <div className="flex flex-col items-center mb-6">
+                <div 
+                  className="relative w-24 h-24 rounded-full bg-white/5 border border-white/10 overflow-hidden group cursor-pointer flex-shrink-0"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {form.avatarUrl ? (
+                    <img src={form.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-white/20">
+                      <User size={32} />
+                    </div>
+                  )}
+                  <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    {uploadingAvatar ? (
+                      <Loader2 size={20} className="text-white animate-spin" />
+                    ) : (
+                      <Camera size={20} className="text-white" />
+                    )}
+                  </div>
                 </div>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  className="hidden" 
+                  accept="image/*" 
+                  onChange={handleAvatarUpload}
+                />
+                <p className="text-xs text-white/40 mt-3 text-center">
+                  Click avatar to upload new photo
+                </p>
               </div>
 
               <div>
@@ -162,15 +202,16 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <label className="text-xs text-white/40 mb-1.5 block">Avatar URL</label>
+                <label className="text-xs text-white/40 mb-1.5 block">Username</label>
                 <div className="relative">
-                  <Image size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
+                  <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
                   <input
-                    type="url"
-                    value={form.avatarUrl}
-                    onChange={handleChange('avatarUrl')}
-                    placeholder="https://example.com/avatar.png"
+                    type="text"
+                    value={form.username}
+                    onChange={handleChange('username')}
+                    placeholder="johndoe"
                     className="input-field pl-10"
+                    required
                   />
                 </div>
               </div>

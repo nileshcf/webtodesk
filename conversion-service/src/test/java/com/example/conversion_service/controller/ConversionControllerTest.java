@@ -3,8 +3,11 @@ package com.example.conversion_service.controller;
 import com.example.conversion_service.dto.*;
 import com.example.conversion_service.entity.ConversionProject.ConversionStatus;
 import com.example.conversion_service.exception.ProjectNotFoundException;
+import com.example.conversion_service.repository.ConversionRepository;
+import com.example.conversion_service.service.BuildQueueService;
 import com.example.conversion_service.service.BuildService;
 import com.example.conversion_service.service.ConversionService;
+import com.example.conversion_service.service.VersionUpgradeService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -32,6 +35,15 @@ class ConversionControllerTest {
     @Mock
     private BuildService buildService;
 
+    @Mock
+    private VersionUpgradeService versionUpgradeService;
+
+    @Mock
+    private ConversionRepository conversionRepository;
+
+    @Mock
+    private BuildQueueService buildQueueService;
+
     @InjectMocks
     private ConversionController controller;
 
@@ -48,17 +60,20 @@ class ConversionControllerTest {
 
     @Test
     void health_shouldReturnUp() {
-        HealthController hc = new HealthController();
-        ResponseEntity<Map<String, String>> response = hc.health();
+        when(conversionRepository.count()).thenReturn(5L);
+        HealthController hc = new HealthController(conversionRepository, buildQueueService);
+        ResponseEntity<Map<String, Object>> response = hc.health();
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).containsEntry("status", "UP");
+        assertThat(response.getBody()).containsKey("uptime");
+        assertThat(response.getBody()).containsKey("components");
     }
 
     // ─── Create ──────────────────────────────────────────
 
     @Test
     void create_shouldDelegateToServiceAndReturn200() {
-        var request = new CreateConversionRequest("My App", "https://example.com", "My App", null, null, null);
+        var request = new CreateConversionRequest("My App", "https://example.com", "My App", null, null, null, null);
         when(conversionService.create(any(), eq("user@test.com"))).thenReturn(sampleResponse());
 
         ResponseEntity<ConversionResponse> response = controller.create(request, "user@test.com");
@@ -112,7 +127,7 @@ class ConversionControllerTest {
         );
         when(conversionService.update(eq("proj-123"), any())).thenReturn(updated);
 
-        var request = new UpdateConversionRequest(null, "https://new-site.com", "New Title", null, "2.0.0", null, null);
+        var request = new UpdateConversionRequest(null, "https://new-site.com", "New Title", null, "2.0.0", null, null, null);
         ResponseEntity<ConversionResponse> response = controller.update("proj-123", request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);

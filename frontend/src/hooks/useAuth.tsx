@@ -1,4 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import { signInWithPopup } from 'firebase/auth';
+import { auth, googleProvider } from '../config/firebase';
 import { authApi, getAccessToken } from '../services/api';
 import type { UpdateProfileRequest, User } from '../types';
 
@@ -7,6 +9,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  googleLogin: () => Promise<void>;
   register: (username: string, email: string, password: string, phoneNumber: number) => Promise<void>;
   updateProfile: (data: UpdateProfileRequest) => Promise<void>;
   logout: () => Promise<void>;
@@ -37,6 +40,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(profile);
   };
 
+  const googleLogin = async () => {
+    const result = await signInWithPopup(auth, googleProvider);
+    const idToken = await result.user.getIdToken();
+    await authApi.googleAuth(idToken);
+    const profile = await authApi.getProfile();
+    setUser(profile);
+  };
+
   const register = async (username: string, email: string, password: string, phoneNumber: number) => {
     await authApi.register({ username, email, password, phoneNumber });
   };
@@ -53,7 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, register, updateProfile, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, googleLogin, register, updateProfile, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -255,8 +255,8 @@ try {
             )
 
             $choice = Read-MenuChoice -Options $menu -Title "Git Operations"
+            if ($choice -eq 0) { break }
             switch ($choice) {
-                0 { break }
                 1 { $result.details = Get-GitSummary }
                 2 { $result.details = @{ branches = Get-GitBranches -IncludeRemote } }
                 3 {

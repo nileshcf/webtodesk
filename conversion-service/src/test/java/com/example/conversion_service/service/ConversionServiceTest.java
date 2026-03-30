@@ -3,6 +3,8 @@ package com.example.conversion_service.service;
 import com.example.conversion_service.dto.*;
 import com.example.conversion_service.entity.ConversionProject;
 import com.example.conversion_service.entity.ConversionProject.ConversionStatus;
+import com.example.conversion_service.entity.ConversionProject.LicenseTier;
+import com.example.conversion_service.exception.LicenseViolationException;
 import com.example.conversion_service.exception.ProjectNotFoundException;
 import com.example.conversion_service.repository.ConversionRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +36,9 @@ class ConversionServiceTest {
     @Mock
     private ModuleRegistry moduleRegistry;
 
+    @Mock
+    private LicenseService licenseService;
+
     @InjectMocks
     private ConversionService conversionService;
 
@@ -48,6 +53,9 @@ class ConversionServiceTest {
         // moduleRegistry returns empty modules by default (no modules enabled)
         lenient().when(moduleRegistry.resolveEnabledModules(any(), any()))
                 .thenReturn(Collections.emptyList());
+        // licenseService returns TRIAL by default
+        lenient().when(licenseService.getUserBestTier(anyString()))
+                .thenReturn(LicenseTier.TRIAL);
 
         sampleProject = ConversionProject.builder()
                 .id("proj-123")
@@ -65,7 +73,7 @@ class ConversionServiceTest {
 
     @Test
     void create_shouldSaveAndReturnResponse() {
-        var request = new CreateConversionRequest("My Test App", "https://example.com", "My Test App", null, null, null);
+        var request = new CreateConversionRequest("My Test App", "https://example.com", "My Test App", null, null, null, null);
         when(repository.save(any(ConversionProject.class))).thenReturn(sampleProject);
 
         ConversionResponse response = conversionService.create(request, "user@example.com");
@@ -78,7 +86,7 @@ class ConversionServiceTest {
 
     @Test
     void create_shouldSanitizeProjectName() {
-        var request = new CreateConversionRequest("My Cool App!", "https://example.com", "Cool App", null, null, null);
+        var request = new CreateConversionRequest("My Cool App!", "https://example.com", "Cool App", null, null, null, null);
         when(repository.save(any(ConversionProject.class))).thenAnswer(inv -> {
             ConversionProject saved = inv.getArgument(0);
             saved.setId("proj-456");
@@ -92,7 +100,7 @@ class ConversionServiceTest {
 
     @Test
     void create_shouldDefaultIconFile() {
-        var request = new CreateConversionRequest("Test", "https://example.com", "Test", null, null, null);
+        var request = new CreateConversionRequest("Test", "https://example.com", "Test", null, null, null, null);
         when(repository.save(any(ConversionProject.class))).thenAnswer(inv -> inv.getArgument(0));
 
         conversionService.create(request, "user@example.com");
@@ -145,7 +153,7 @@ class ConversionServiceTest {
         when(repository.findById("proj-123")).thenReturn(Optional.of(sampleProject));
         when(repository.save(any(ConversionProject.class))).thenReturn(sampleProject);
 
-        var request = new UpdateConversionRequest(null, "https://new-url.com", "New Title", null, "2.0.0", null, null);
+        var request = new UpdateConversionRequest(null, "https://new-url.com", "New Title", null, "2.0.0", null, null, null);
         conversionService.update("proj-123", request);
 
         verify(repository).save(argThat(project ->
@@ -159,7 +167,7 @@ class ConversionServiceTest {
     void update_shouldThrowWhenNotFound() {
         when(repository.findById("nonexistent")).thenReturn(Optional.empty());
 
-        var request = new UpdateConversionRequest("name", null, null, null, null, null, null);
+        var request = new UpdateConversionRequest("name", null, null, null, null, null, null, null);
 
         assertThatThrownBy(() -> conversionService.update("nonexistent", request))
                 .isInstanceOf(ProjectNotFoundException.class);
@@ -266,5 +274,75 @@ class ConversionServiceTest {
         assertThat(packageJson).contains("\"name\": \"my-test-app\"");
         assertThat(packageJson).contains("\"version\": \"1.0.0\"");
         assertThat(packageJson).contains("electron-builder");
+    }
+
+    // ─── Tier gating ──────────────────────────────────────────────────────────
+
+    @Test
+    void create_shouldBlockProModulesForTrialUser() {
+        // screen-protect is PRO-only, TRIAL user should be blocked
+        when(licenseService.getUserBestTier("user@example.com")).thenReturn(LicenseTier.TRIAL);
+        when(moduleRegistry.isAvailable("screen-protect", LicenseTier.TRIAL)).thenReturn(false);
+        when(moduleRegistry.get("screen-protect"))
+                .thenReturn(Optional.of(new ModuleRegistry.ModuleDefinition(
+                        "screen-protect", "Screen Protection", "desc",
+                        com.example.conversion_service.entity.ConversionProject.LicenseTier.PRO,
+                        "modules/screen-protect.mustache")));
+
+        var request = new CreateConversionRequest(
+                "My App", "https://example.com", "My App", null,
+                List.of("screen-protect"), null, null);
+
+        assertThatThrownBy(() -> conversionService.create(request, "user@example.com"))
+                .isInstanceOf(LicenseViolationException.class)
+                .hasMessageContaining("screen-protect")
+                .hasMessageContaining("TRIAL");
+    }
+
+    @Test
+    void create_shouldAllowTrialModulesForTrialUser() {
+        when(licenseService.getUserBestTier("user@example.com")).thenReturn(LicenseTier.TRIAL);
+        when(moduleRegistry.isAvailable("offline", LicenseTier.TRIAL)).thenReturn(true);
+        when(repository.save(any(ConversionProject.class))).thenReturn(sampleProject);
+
+        var request = new CreateConversionRequest(
+                "My App", "https://example.com", "My App", null,
+                List.of("offline"), null, null);
+
+        assertThatNoException().isThrownBy(() -> conversionService.create(request, "user@example.com"));
+    }
+
+    @Test
+    void update_shouldBlockProModulesForTrialProject() {
+        ConversionProject trialProject = ConversionProject.builder()
+                .id("proj-123").projectName("app").websiteUrl("https://x.com")
+                .appTitle("App").tier(LicenseTier.TRIAL).build();
+        when(repository.findById("proj-123")).thenReturn(Optional.of(trialProject));
+        when(moduleRegistry.isAvailable("deep-link", LicenseTier.TRIAL)).thenReturn(false);
+        when(moduleRegistry.get("deep-link"))
+                .thenReturn(Optional.of(new ModuleRegistry.ModuleDefinition(
+                        "deep-link", "Deep Link", "desc",
+                        com.example.conversion_service.entity.ConversionProject.LicenseTier.PRO,
+                        "modules/deep-link.mustache")));
+
+        var request = new UpdateConversionRequest(null, null, null, null, null,
+                List.of("deep-link"), null, null);
+
+        assertThatThrownBy(() -> conversionService.update("proj-123", request))
+                .isInstanceOf(LicenseViolationException.class)
+                .hasMessageContaining("deep-link");
+    }
+
+    @Test
+    void create_shouldAllowProModulesForProUser() {
+        when(licenseService.getUserBestTier("pro@example.com")).thenReturn(LicenseTier.PRO);
+        when(moduleRegistry.isAvailable("screen-protect", LicenseTier.PRO)).thenReturn(true);
+        when(repository.save(any(ConversionProject.class))).thenReturn(sampleProject);
+
+        var request = new CreateConversionRequest(
+                "My App", "https://example.com", "My App", null,
+                List.of("screen-protect"), null, null);
+
+        assertThatNoException().isThrownBy(() -> conversionService.create(request, "pro@example.com"));
     }
 }

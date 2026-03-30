@@ -1,17 +1,161 @@
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Sparkles } from 'lucide-react';
+import { ArrowRight, Sparkles, Monitor, Apple, Laptop } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+
+const TYPED_URL = 'https://your-awesome-app.com';
+
+function TypingDemo() {
+  const [charIndex, setCharIndex] = useState(0);
+  const [phase, setPhase] = useState<'typing' | 'building' | 'done'>('typing');
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (phase === 'typing') {
+      if (charIndex < TYPED_URL.length) {
+        const t = setTimeout(() => setCharIndex(c => c + 1), 60);
+        return () => clearTimeout(t);
+      }
+      const t = setTimeout(() => setPhase('building'), 500);
+      return () => clearTimeout(t);
+    }
+    if (phase === 'building') {
+      if (progress < 100) {
+        const t = setTimeout(() => setProgress(p => Math.min(100, p + 2)), 30);
+        return () => clearTimeout(t);
+      }
+      const t = setTimeout(() => setPhase('done'), 400);
+      return () => clearTimeout(t);
+    }
+  }, [phase, charIndex, progress]);
+
+  // Auto restart the animation
+  useEffect(() => {
+    if (phase === 'done') {
+      const t = setTimeout(() => {
+        setPhase('typing');
+        setCharIndex(0);
+        setProgress(0);
+      }, 3000);
+      return () => clearTimeout(t);
+    }
+  }, [phase]);
+
+  return (
+    <div className="w-full max-w-2xl mx-auto">
+      <div className="glass-card overflow-hidden">
+        {/* Title bar */}
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5">
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
+            <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/70" />
+            <div className="w-2.5 h-2.5 rounded-full bg-green-500/70" />
+          </div>
+          <div className="flex-1 ml-3">
+            <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-white/[0.03] border border-white/5 max-w-md">
+              <span className="text-[11px] font-mono text-white/20 select-none">URL:</span>
+              <span className="text-[11px] font-mono text-indigo-300/80">
+                {TYPED_URL.slice(0, charIndex)}
+                {phase === 'typing' && (
+                  <span className="inline-block w-[1px] h-3 bg-indigo-400 ml-0.5 animate-pulse" />
+                )}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Content area */}
+        <div className="p-6 sm:p-8 min-h-[180px] flex items-center justify-center">
+          {phase === 'typing' && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-center"
+            >
+              <Monitor size={32} className="mx-auto text-white/10 mb-3" />
+              <p className="text-xs text-white/20">Paste any URL to begin conversion...</p>
+            </motion.div>
+          )}
+
+          {phase === 'building' && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="w-full max-w-xs"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-white/40 font-medium">Building desktop app...</span>
+                <span className="text-xs font-mono text-indigo-400">{progress}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-white/[0.05] overflow-hidden">
+                <motion.div
+                  className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <div className="flex items-center gap-4 mt-4 justify-center">
+                {['Installing deps', 'Electron build', 'Packaging'].map((step, i) => (
+                  <span
+                    key={step}
+                    className={`text-[10px] ${
+                      progress > (i + 1) * 30 ? 'text-indigo-400' : 'text-white/15'
+                    } transition-colors duration-500`}
+                  >
+                    {step}
+                  </span>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {phase === 'done' && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ type: 'spring', stiffness: 200, damping: 20 }}
+              className="text-center"
+            >
+              <div className="inline-flex items-center gap-3 px-5 py-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 mb-3">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 flex items-center justify-center">
+                  <Sparkles size={16} className="text-emerald-400" />
+                </div>
+                <div className="text-left">
+                  <p className="text-xs font-semibold text-emerald-300">Build Complete</p>
+                  <p className="text-[10px] text-emerald-400/60">your-awesome-app.exe — 48.2 MB</p>
+                </div>
+              </div>
+              <div className="flex items-center justify-center gap-3 mt-2">
+                {[
+                  { icon: Laptop, label: '.exe' },
+                  { icon: Apple, label: '.dmg' },
+                  { icon: Monitor, label: '.AppImage' },
+                ].map(({ icon: Icon, label }) => (
+                  <div key={label} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/[0.03] border border-white/5">
+                    <Icon size={10} className="text-white/30" />
+                    <span className="text-[9px] text-white/30">{label}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Hero() {
   const { isAuthenticated, isLoading } = useAuth();
 
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-20">
-      {/* Background glow */}
+      {/* Background mesh */}
+      <div className="absolute inset-0 mesh-gradient pointer-events-none" />
       <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[600px] bg-accent-blue/8 rounded-full blur-[120px]" />
-        <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-accent-violet/5 rounded-full blur-[100px]" />
+        <div className="glow-orb w-[600px] h-[400px] bg-indigo-500/[0.06] top-[10%] left-1/2 -translate-x-1/2" />
+        <div className="glow-orb w-[300px] h-[300px] bg-violet-500/[0.04] bottom-[20%] right-[15%] animate-float-slow" />
+        <div className="glow-orb w-[200px] h-[200px] bg-emerald-500/[0.03] bottom-[30%] left-[10%] animate-float" />
       </div>
 
       <div className="relative z-10 max-w-5xl mx-auto px-6 text-center">
@@ -19,103 +163,91 @@ export default function Hero() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.1 }}
-          className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/10 bg-white/5 mb-8"
+          transition={{ duration: 0.5 }}
+          className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/[0.08] bg-white/[0.03] mb-8"
         >
-          <Sparkles size={14} className="text-accent-blue" />
-          <span className="text-xs text-white/60 tracking-wide">Instant Website-to-Desktop Conversion</span>
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-[11px] text-white/50 tracking-wide font-medium">Website to Desktop in seconds</span>
         </motion.div>
 
         {/* Headline */}
         <motion.h1
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ type: 'spring', stiffness: 80, damping: 20, delay: 0.2 }}
-          className="text-5xl sm:text-7xl lg:text-8xl font-bold tracking-tight leading-[0.95] mb-6"
+          transition={{ type: 'spring', stiffness: 80, damping: 20, delay: 0.1 }}
+          className="text-5xl sm:text-7xl lg:text-[5.5rem] font-extrabold tracking-tight leading-[0.95] mb-6"
         >
-          <span className="gradient-text">Any Website.</span>
+          <span className="gradient-text">Convert any website</span>
           <br />
-          <span className="text-white">One Desktop App.</span>
+          <span className="gradient-text-blue">into a desktop app.</span>
         </motion.h1>
 
         {/* Subheadline */}
         <motion.p
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.4 }}
-          className="text-lg sm:text-xl text-white/40 max-w-2xl mx-auto mb-10 leading-relaxed font-light"
+          transition={{ duration: 0.5, delay: 0.25 }}
+          className="text-base sm:text-lg text-white/35 max-w-xl mx-auto mb-10 leading-relaxed font-light"
         >
-          Paste a URL. Get a native desktop application with screenshot protection,
-          auto-updates, and cross-platform builds — in seconds.
+          Paste a URL. Get a secure native desktop application with screenshot protection,
+          auto-updates, and cross-platform builds — no code changes needed.
         </motion.p>
 
         {/* CTAs */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.55 }}
-          className="flex flex-col sm:flex-row items-center justify-center gap-4"
+          transition={{ duration: 0.5, delay: 0.35 }}
+          className="flex flex-col sm:flex-row items-center justify-center gap-3"
         >
           {isLoading ? (
             <>
-              <button
-                type="button"
-                disabled
-                className="btn-primary flex items-center gap-2 opacity-100"
-              >
-                Preparing...
-              </button>
-              <button
-                type="button"
-                disabled
-                className="btn-ghost opacity-100"
-              >
-                Please wait
-              </button>
+              <button type="button" disabled className="btn-accent opacity-60">Loading...</button>
+              <button type="button" disabled className="btn-ghost opacity-60">Please wait</button>
             </>
           ) : isAuthenticated ? (
             <>
-              <Link to="/dashboard" className="btn-primary flex items-center gap-2 group">
+              <Link to="/dashboard" className="btn-accent flex items-center gap-2 group">
                 Open Dashboard
-                <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
+                <ArrowRight size={15} className="transition-transform group-hover:translate-x-1" />
               </Link>
-              <Link to="/settings" className="btn-ghost">
-                Profile & Settings
-              </Link>
+              <Link to="/settings" className="btn-ghost">Settings</Link>
             </>
           ) : (
             <>
-              <Link to="/register" className="btn-primary flex items-center gap-2 group">
-                Start Converting
-                <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
+              <Link to="/register" className="btn-accent flex items-center gap-2 group">
+                Start Building Free
+                <ArrowRight size={15} className="transition-transform group-hover:translate-x-1" />
               </Link>
-              <Link to="/login" className="btn-ghost">
-                Sign In
-              </Link>
+              <Link to="/login" className="btn-ghost">Sign In</Link>
             </>
           )}
         </motion.div>
 
-        {/* Floating mockup hint */}
+        {/* Animated demo */}
         <motion.div
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ type: 'spring', stiffness: 60, delay: 0.7 }}
-          className="mt-20 glass-card p-1 max-w-3xl mx-auto"
+          transition={{ type: 'spring', stiffness: 50, damping: 20, delay: 0.5 }}
+          className="mt-16 sm:mt-20"
         >
-          <div className="bg-surface-secondary rounded-2xl p-6 sm:p-10">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-3 h-3 rounded-full bg-red-500/60" />
-              <div className="w-3 h-3 rounded-full bg-yellow-500/60" />
-              <div className="w-3 h-3 rounded-full bg-green-500/60" />
-              <div className="ml-4 flex-1 h-6 rounded-lg bg-white/5 flex items-center px-3">
-                <span className="text-xs text-white/20 font-mono">https://your-website.com</span>
-              </div>
-            </div>
-            <div className="h-40 sm:h-56 rounded-xl bg-gradient-to-br from-white/[0.03] to-transparent border border-white/5 flex items-center justify-center">
-              <p className="text-white/10 text-sm">Your website renders here as a desktop app</p>
-            </div>
-          </div>
+          <TypingDemo />
+        </motion.div>
+
+        {/* Social proof */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.8 }}
+          className="mt-12 flex items-center justify-center gap-6 text-[11px] text-white/20"
+        >
+          <span>Windows</span>
+          <span className="w-px h-3 bg-white/10" />
+          <span>macOS</span>
+          <span className="w-px h-3 bg-white/10" />
+          <span>Linux</span>
+          <span className="w-px h-3 bg-white/10" />
+          <span>Cross-platform builds</span>
         </motion.div>
       </div>
     </section>

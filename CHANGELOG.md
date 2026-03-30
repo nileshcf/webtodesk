@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 ---
 
+## [1.8.0] - 2026-03-30 — Premium Frontend UI Overhaul & Scripts Organization
+
+### Overview
+
+Transformed the WebToDesk frontend into a premium, professional-grade SaaS platform. Implemented a sophisticated design system with animated gradients and glass-morphism. Overhauled the landing page with new conversion-focused sections and enhanced the dashboard UI. Additionally, reorganized loose automation scripts into a dedicated directory and fixed test suite execution issues in the backend.
+
+### Added
+
+- **Frontend Sections**: Added new conversion-focused components: `HowItWorks.tsx`, `Pricing.tsx`, `Stats.tsx`, and `CTASection.tsx` for the landing page.
+
+### Changed
+
+- **UI Overhaul**: Re-styled `Hero`, `Navbar`, `Footer`, `DashboardPage`, `ProjectWizard`, and `BuildDashboard` adopting a cohesive dark theme, glass-morphism, and micro-animations.
+- **Script Organization**: Moved loose root-level PowerShell scripts (`ai-doc-sync.ps1`, `git-operations.ps1`, `docker-start.ps1`, `test-build.ps1`, etc.) into a dedicated `scripts/` directory to declutter the root workspace.
+
+### Fixed
+
+- **ConversionService Tests**: Removed a temporary "DEV MODE BYPASS" and restored throwing `LicenseViolationException` on tier mismatches. This resolved a `NullPointerException` that was failing the backend continuous integration test suite (`shouldBlockProModulesForTrialUser` and `update_shouldBlockProModulesForTrialProject`).
+- **Git Operations Script**: Fixed an infinite loop bug in `git-operations.ps1` interactive mode where selecting the exit option (`0`) failed to properly terminate the script.
+
+---
+
 ## [1.7.0] - 2026-03-29 — Docker Build Pipeline Hardening & noexec tmpfs Fix
 
 ### Overview

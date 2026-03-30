@@ -1,0 +1,42 @@
+// Module: window-polish — Tier: STARTER
+// Applies visual window enhancements: opacity, always-on-top, vibrancy/acrylic blur.
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('window-polish')) return;
+
+  const { process } = require('electron').app
+    ? { process: require('process') }
+    : { process: globalThis.process };
+
+  const {
+    alwaysOnTop = false,
+    opacity = 1.0,
+    blur = false
+  } = config.windowPolish || {};
+
+  if (alwaysOnTop) {
+    mainWindow.setAlwaysOnTop(true, 'floating');
+  }
+
+  if (typeof opacity === 'number' && opacity >= 0.0 && opacity < 1.0) {
+    mainWindow.setOpacity(opacity);
+  }
+
+  if (blur) {
+    const platform = process.platform;
+    if (platform === 'darwin') {
+      mainWindow.setVibrancy('under-window');
+    } else if (platform === 'win32') {
+      try {
+        mainWindow.setBackgroundMaterial('acrylic');
+      } catch (_) {
+        // setBackgroundMaterial requires Windows 11 — ignore on older Windows
+      }
+    }
+  }
+}
+
+function preloadSetup() {}
+
+function teardown() {}
+
+module.exports = { setup, preloadSetup, teardown };

@@ -20,6 +20,8 @@ import org.springframework.data.mongodb.core.mapping.Document;
 
 
 
+import com.example.conversion_service.dto.ModuleConfig;
+
 import java.time.Instant;
 
 import java.util.List;
@@ -118,6 +120,8 @@ public class ConversionProject {
 
     // ── Module system (nullable — existing documents stay valid) ──
     private List<String> enabledModules; // keys of enabled modules, e.g. ["offline", "splash-screen"]
+
+    private ModuleConfig moduleConfig;   // typed per-module configuration (nullable — null = use defaults)
 
     private String targetPlatform;       // "win" | "linux" — set by user in wizard, overrides server env var
 

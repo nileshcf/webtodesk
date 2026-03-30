@@ -15,6 +15,10 @@ import org.slf4j.MDC;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.*;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.time.Instant;
@@ -104,8 +108,10 @@ public class BuildService {
         repository.save(project);
         emitProgress(projectId, "PREPARING", "Preparing build workspace...");
 
-        buildQueueService.recordBuildStarted(projectId,
-                project.getTier() != null ? project.getTier() : com.example.conversion_service.entity.ConversionProject.LicenseTier.TRIAL);
+        com.example.conversion_service.entity.ConversionProject.LicenseTier effectiveTier =
+                project.getTier() != null ? project.getTier() : com.example.conversion_service.entity.ConversionProject.LicenseTier.TRIAL;
+        buildQueueService.recordBuildStarted(projectId, effectiveTier);
+        buildMetricsService.recordBuildStarted(effectiveTier, resolveBuildTarget(project).cliValue);
 
         Path workspace = null;
         boolean buildFailed = false;
@@ -243,6 +249,14 @@ public class BuildService {
         BuildTarget buildTarget = resolveBuildTarget(project);
         updateProgress(project, "BUILDING", "Running electron-builder for " + buildTarget.cliValue + " target (this may take a few minutes)...");
 
+        // OS-aware pre-fix: warm the winCodeSign cache on Windows to avoid symlink privilege failures.
+        // electron-builder's internal 7-Zip extraction uses -snld (preserve symlinks), which requires
+        // SeCreateSymbolicLinkPrivilege — not available without Admin or Developer Mode.
+        // We pre-extract the archive ourselves, tolerating symlink errors for darwin-only files.
+        if (isWindows() && buildTarget == BuildTarget.WIN) {
+            prepareWindowsCodeSignCache(project, workspace);
+        }
+
         Map<String, String> envOverrides = buildEnvironmentOverridesFor(buildTarget);
         if (buildTarget == BuildTarget.WIN && !isWindows()) {
             ProcessResult wineboot = runProcessWithRetries(
@@ -362,6 +376,22 @@ public class BuildService {
     private void validateBuildEnvironment(ConversionProject project) throws IOException, InterruptedException {
         updateProgress(project, "VALIDATING_ENV", "Checking build environment...");
 
+        // ── OS Diagnostics ──
+        String osName = System.getProperty("os.name", "unknown");
+        String osArch = System.getProperty("os.arch", "unknown");
+        log.info("[env] os='{}' arch='{}'", osName, osArch);
+
+        if (isWindows()) {
+            boolean symlinkOk = hasSymlinkPrivilege();
+            if (symlinkOk) {
+                log.info("[env] Windows symlink privilege: AVAILABLE (Developer Mode or Admin)");
+            } else {
+                log.warn("[env] Windows symlink privilege: NOT AVAILABLE — " +
+                         "will auto-fix electron-builder cache extractions to avoid symlink failures. " +
+                         "Tip: Enable Developer Mode (Settings → Privacy & Security → For developers) for a permanent fix.");
+            }
+        }
+
         String nodeVersion = getToolVersion("node", "--version");
         if (nodeVersion == null) {
             throw new IOException(
@@ -382,6 +412,8 @@ public class BuildService {
         log.info("[env] npm  {}", npmVersion);
 
         BuildTarget buildTarget = resolveBuildTarget(project);
+
+        // ── Linux-specific checks ──
         if (buildTarget == BuildTarget.LINUX && "AppImage".equalsIgnoreCase(linuxTarget) && !isWindows()) {
             if (!isLibFuse2Available()) {
                 throw new IOException(
@@ -391,6 +423,8 @@ public class BuildService {
                         "Fix: install 'libfuse2' (Ubuntu/Debian) or change webtodesk.build.linux-target to 'deb'/'rpm'.");
             }
         }
+
+        // ── Cross-compilation checks ──
         if (buildTarget == BuildTarget.WIN && !isWindows()) {
             String wineVersion = getToolVersion("wine", "--version");
             if (wineVersion == null) {
@@ -409,8 +443,8 @@ public class BuildService {
                     "Insufficient disk space: " + freeSpaceMB + " MB free in " + buildOutputDir +
                     ". Electron builds require at least 512 MB.");
         }
-        log.info("[env] os='{}' target={} freeSpace={}MB outputDir={}",
-                System.getProperty("os.name"), resolveBuildTarget().cliValue, freeSpaceMB, buildOutputDir);
+        log.info("[env] target={} freeSpace={}MB outputDir={}",
+                resolveBuildTarget().cliValue, freeSpaceMB, buildOutputDir);
     }
 
     private Map<String, String> buildEnvironment() {
@@ -587,6 +621,7 @@ public class BuildService {
         if (output == null) return true;
         String o = output.toLowerCase(Locale.ROOT);
 
+        // Network transient failures — always retryable
         if (o.contains("etimedout")
                 || o.contains("econnreset")
                 || o.contains("eai_again")
@@ -602,6 +637,15 @@ public class BuildService {
                 || o.contains("http 502")
                 || o.contains("http 503")
                 || o.contains("http 504")) {
+            return true;
+        }
+
+        // Windows symlink privilege failures — retryable because prepareWindowsCodeSignCache
+        // runs before each retry attempt and fixes the cache
+        if (o.contains("cannot create symbolic link")
+                || o.contains("privilege is not held")
+                || o.contains("symbolic link privilege")) {
+            log.info("[retry] Detected Windows symlink privilege failure — will pre-fix cache before retry");
             return true;
         }
 
@@ -822,13 +866,19 @@ public class BuildService {
         LicenseTier tier = project.getTier() != null ? project.getTier() : LicenseTier.TRIAL;
         List<String> resolved = moduleRegistry.resolveEnabledModules(project.getEnabledModules(), tier, developmentBuild);
 
-        StringBuilder requires = new StringBuilder();
-        StringBuilder setups = new StringBuilder();
+        StringBuilder requires      = new StringBuilder();
+        StringBuilder setups        = new StringBuilder();
+        StringBuilder preloadReqs   = new StringBuilder();
+        StringBuilder preloadSetups = new StringBuilder();
         for (String key : resolved) {
             String varName = key.replace('-', '_');
             requires.append("const ").append(varName)
                     .append(" = require('./modules/").append(key).append("');\n");
             setups.append("  ").append(varName).append(".setup(mainWindow, config);\n");
+            preloadReqs.append("const ").append(varName)
+                    .append(" = require('./modules/").append(key).append("');\n");
+            preloadSetups.append("  ").append(varName)
+                    .append(".preloadSetup(contextBridge, ipcRenderer, config);\n");
         }
 
         String modulesJson = resolved.isEmpty() ? "[]"
@@ -847,6 +897,9 @@ public class BuildService {
         ctx.put("hasScreenProtect", resolved.contains("screen-protect"));
         ctx.put("moduleRequires",  requires.toString());
         ctx.put("moduleSetups",    setups.toString());
+        ctx.put("preloadModuleRequires", preloadReqs.toString());
+        ctx.put("preloadModuleSetups",   preloadSetups.toString());
+        applyModuleConfigContext(ctx, resolved, project.getModuleConfig());
 
         // Build-target context — drives platform-specific section in package.mustache
         BuildTarget target = resolveBuildTarget(project);
@@ -867,9 +920,136 @@ public class BuildService {
                             templateEngine.render(def.templateFile(), Map.of())));
         }
 
+        // Bundle the standalone lock screen when the expiry module is enabled
+        if (resolved.contains("expiry")) {
+            files.put("expired.html", templateEngine.render("expired.html.mustache", ctx));
+        }
+
         log.debug("Generated {} files ({} modules) for project '{}'",
                 files.size(), resolved.size(), project.getProjectName());
         return files;
+    }
+
+    private static void applyModuleConfigContext(Map<String, Object> ctx, List<String> resolved,
+                                                  com.example.conversion_service.dto.ModuleConfig mc) {
+        boolean hasDomainLock = resolved.contains("domain-lock");
+        ctx.put("hasDomainLock", hasDomainLock);
+        if (hasDomainLock) {
+            com.example.conversion_service.dto.ModuleConfig.DomainLockConfig dlc =
+                    (mc != null && mc.getDomainLock() != null)
+                    ? mc.getDomainLock()
+                    : new com.example.conversion_service.dto.ModuleConfig.DomainLockConfig();
+            ctx.put("domainLockConfigJson", toJson(dlc));
+        }
+
+        boolean hasTitleBar = resolved.contains("title-bar");
+        ctx.put("hasTitleBar", hasTitleBar);
+        if (hasTitleBar) {
+            com.example.conversion_service.dto.ModuleConfig.TitleBarConfig tbc =
+                    (mc != null && mc.getTitleBar() != null)
+                    ? mc.getTitleBar()
+                    : new com.example.conversion_service.dto.ModuleConfig.TitleBarConfig();
+            ctx.put("titleBarConfigJson", toJson(tbc));
+        }
+
+        boolean hasWatermark = resolved.contains("watermark");
+        ctx.put("hasWatermark", hasWatermark);
+        if (hasWatermark) {
+            com.example.conversion_service.dto.ModuleConfig.WatermarkConfig wmc =
+                    (mc != null && mc.getWatermark() != null)
+                    ? mc.getWatermark()
+                    : new com.example.conversion_service.dto.ModuleConfig.WatermarkConfig();
+            if (wmc.getExpiresAt() == null && mc != null && mc.getExpiry() != null) {
+                wmc.setExpiresAt(mc.getExpiry().getExpiresAt());
+            }
+            ctx.put("watermarkConfigJson", toJson(wmc));
+        }
+
+        boolean hasExpiry = resolved.contains("expiry");
+        ctx.put("hasExpiry", hasExpiry);
+        if (hasExpiry) {
+            com.example.conversion_service.dto.ModuleConfig.ExpiryConfig ec =
+                    (mc != null && mc.getExpiry() != null)
+                    ? mc.getExpiry()
+                    : new com.example.conversion_service.dto.ModuleConfig.ExpiryConfig();
+            ctx.put("expiryConfigJson", toJson(ec));
+            ctx.put("lockMessage", ec.getLockMessage());
+            ctx.put("upgradeUrl", ec.getUpgradeUrl());
+        }
+
+        ctx.put("hasNotifications", resolved.contains("notifications"));
+        ctx.put("hasDarkMode",      resolved.contains("dark-mode"));
+
+        boolean hasSystemTray = resolved.contains("system-tray");
+        ctx.put("hasSystemTray", hasSystemTray);
+        if (hasSystemTray) {
+            com.example.conversion_service.dto.ModuleConfig.SystemTrayConfig stc =
+                    (mc != null && mc.getSystemTray() != null)
+                    ? mc.getSystemTray()
+                    : new com.example.conversion_service.dto.ModuleConfig.SystemTrayConfig();
+            ctx.put("systemTrayConfigJson", toJson(stc));
+        }
+
+        boolean hasRightClick = resolved.contains("right-click");
+        ctx.put("hasRightClick", hasRightClick);
+        if (hasRightClick) {
+            com.example.conversion_service.dto.ModuleConfig.RightClickConfig rcc =
+                    (mc != null && mc.getRightClick() != null)
+                    ? mc.getRightClick()
+                    : new com.example.conversion_service.dto.ModuleConfig.RightClickConfig();
+            ctx.put("rightClickConfigJson", toJson(rcc));
+        }
+
+        boolean hasAutoUpdate = resolved.contains("auto-update");
+        ctx.put("hasAutoUpdate", hasAutoUpdate);
+        if (hasAutoUpdate) {
+            com.example.conversion_service.dto.ModuleConfig.AutoUpdateConfig auc =
+                    (mc != null && mc.getAutoUpdate() != null)
+                    ? mc.getAutoUpdate()
+                    : new com.example.conversion_service.dto.ModuleConfig.AutoUpdateConfig();
+            ctx.put("autoUpdateConfigJson", toJson(auc));
+        }
+
+        boolean hasKeyBindings = resolved.contains("key-bindings");
+        ctx.put("hasKeyBindings", hasKeyBindings);
+        if (hasKeyBindings) {
+            com.example.conversion_service.dto.ModuleConfig.KeyBindingsConfig kbc =
+                    (mc != null && mc.getKeyBindings() != null)
+                    ? mc.getKeyBindings()
+                    : new com.example.conversion_service.dto.ModuleConfig.KeyBindingsConfig();
+            ctx.put("keyBindingsConfigJson", toJson(kbc));
+        }
+
+        boolean hasWindowPolish = resolved.contains("window-polish");
+        ctx.put("hasWindowPolish", hasWindowPolish);
+        if (hasWindowPolish) {
+            com.example.conversion_service.dto.ModuleConfig.WindowPolishConfig wpc =
+                    (mc != null && mc.getWindowPolish() != null)
+                    ? mc.getWindowPolish()
+                    : new com.example.conversion_service.dto.ModuleConfig.WindowPolishConfig();
+            ctx.put("windowPolishConfigJson", toJson(wpc));
+        }
+
+        boolean hasClipboard = resolved.contains("clipboard");
+        ctx.put("hasClipboard", hasClipboard);
+        if (hasClipboard) {
+            com.example.conversion_service.dto.ModuleConfig.ClipboardConfig cc =
+                    (mc != null && mc.getClipboard() != null)
+                    ? mc.getClipboard()
+                    : new com.example.conversion_service.dto.ModuleConfig.ClipboardConfig();
+            ctx.put("clipboardConfigJson", toJson(cc));
+        }
+    }
+
+    private static String toJson(Object obj) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper()
+                    .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
+                    .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                    .writeValueAsString(obj);
+        } catch (Exception e) {
+            return "{}";
+        }
     }
 
     private static Integer parseMajorVersion(String version) {
@@ -940,6 +1120,152 @@ public class BuildService {
             return false;
         }
         return false;
+    }
+
+    // ─── OS-Aware Auto-Healing ───────────────────────────
+
+    /**
+     * Tests whether the current process has the privilege to create symbolic links.
+     * On Windows, this requires either Administrator elevation or Developer Mode enabled.
+     * On Linux/macOS, symlinks always work for the file owner.
+     */
+    private boolean hasSymlinkPrivilege() {
+        if (!isWindows()) return true;
+        Path testDir = null;
+        try {
+            testDir = Files.createTempDirectory("symlink-test-");
+            Path target = testDir.resolve("target.txt");
+            Files.writeString(target, "test");
+            Path link = testDir.resolve("link.txt");
+            Files.createSymbolicLink(link, target);
+            return true;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (testDir != null) {
+                try (Stream<Path> walk = Files.walk(testDir)) {
+                    walk.sorted(Comparator.reverseOrder()).forEach(p -> {
+                        try { Files.deleteIfExists(p); } catch (IOException ignored) {}
+                    });
+                } catch (IOException ignored) {}
+            }
+        }
+    }
+
+    /**
+     * Pre-populates the electron-builder winCodeSign cache on Windows when the current
+     * process lacks symlink privileges.
+     *
+     * <p>The winCodeSign archive contains macOS symlinks (libcrypto.dylib, libssl.dylib)
+     * that are irrelevant on Windows but cause 7-Zip to return exit code 2 when extracted
+     * with the {@code -snld} flag (which electron-builder's internal extractor uses).
+     * Electron-builder treats exit code 2 as fatal, aborting the entire build.</p>
+     *
+     * <p>This method downloads and extracts the archive ourselves WITHOUT the {@code -snld}
+     * flag, so 7-Zip silently skips the macOS symlinks. The resulting cache directory is
+     * exactly what electron-builder expects, so it skips its own extraction entirely.</p>
+     */
+    private void prepareWindowsCodeSignCache(ConversionProject project, Path workspace) {
+        if (!isWindows() || hasSymlinkPrivilege()) {
+            return; // No fix needed — symlinks work fine
+        }
+
+        String cacheBase = buildEnvironment().getOrDefault("ELECTRON_BUILDER_CACHE",
+                System.getProperty("java.io.tmpdir") + File.separator + "electron-builder-cache");
+        Path winCodeSignDir = Paths.get(cacheBase, "winCodeSign");
+        String version = "winCodeSign-2.6.0";
+        Path versionDir = winCodeSignDir.resolve(version);
+        Path windowsMarker = versionDir.resolve("windows-10");
+
+        // If cache is already populated with the Windows binaries, skip
+        if (Files.isDirectory(windowsMarker)) {
+            log.info("[auto-fix] winCodeSign cache already populated at {}", versionDir);
+            return;
+        }
+
+        log.info("[auto-fix] Windows symlink privilege unavailable — pre-populating winCodeSign cache to avoid build failure");
+        emitProgress(project.getId(), "AUTO_FIX", "Auto-fixing Windows build cache (symlink workaround)...");
+
+        try {
+            Files.createDirectories(winCodeSignDir);
+
+            // Download the archive
+            String archiveUrl = "https://github.com/electron-userland/electron-builder-binaries/releases/download/"
+                    + version + "/" + version + ".7z";
+            Path archivePath = winCodeSignDir.resolve(version + ".7z");
+
+            if (!Files.exists(archivePath) || Files.size(archivePath) < 1_000_000) {
+                log.info("[auto-fix] Downloading {} ...", archiveUrl);
+                HttpClient client = HttpClient.newBuilder()
+                        .followRedirects(HttpClient.Redirect.NORMAL)
+                        .build();
+                HttpResponse<Path> resp = client.send(
+                        HttpRequest.newBuilder(URI.create(archiveUrl)).GET().build(),
+                        HttpResponse.BodyHandlers.ofFile(archivePath));
+                if (resp.statusCode() != 200) {
+                    log.warn("[auto-fix] Failed to download winCodeSign archive (HTTP {}), " +
+                             "electron-builder will retry its own download", resp.statusCode());
+                    return;
+                }
+                log.info("[auto-fix] Downloaded {} ({} KB)", archivePath.getFileName(),
+                        Files.size(archivePath) / 1024);
+            }
+
+            // Find 7za.exe — either from the workspace's node_modules or system PATH
+            Path sevenZip = workspace.resolve("node_modules").resolve("7zip-bin")
+                    .resolve("win").resolve("x64").resolve("7za.exe");
+            String sevenZipExe;
+            if (Files.exists(sevenZip)) {
+                sevenZipExe = sevenZip.toAbsolutePath().toString();
+            } else {
+                // Fallback: try system 7z
+                sevenZipExe = "7z";
+                String sevenZipVersion = getToolVersion(sevenZipExe, "--help");
+                if (sevenZipVersion == null) {
+                    log.warn("[auto-fix] 7-Zip not found — cannot pre-populate cache, " +
+                             "electron-builder will attempt its own extraction");
+                    return;
+                }
+            }
+
+            // Extract WITHOUT -snld: 7-Zip will skip symlinks instead of failing
+            // The -aoa flag overwrites existing files without prompts
+            ProcessBuilder pb = new ProcessBuilder(
+                    sevenZipExe, "x", "-bd", "-aoa",
+                    archivePath.toAbsolutePath().toString(),
+                    "-o" + versionDir.toAbsolutePath()
+            ).redirectErrorStream(true).directory(winCodeSignDir.toFile());
+
+            Process p = pb.start();
+            String output;
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                output = r.lines().collect(Collectors.joining("\n"));
+            }
+            boolean finished = p.waitFor(120, TimeUnit.SECONDS);
+            if (!finished) {
+                p.destroyForcibly();
+                log.warn("[auto-fix] 7-Zip extraction timed out");
+                return;
+            }
+
+            int exitCode = p.exitValue();
+            // Exit code 0 = success, 1 = non-fatal warnings, 2 = fatal (but we're not using -snld
+            // so symlink errors won't occur). Accept 0 and 1.
+            if (exitCode <= 1) {
+                log.info("[auto-fix] Successfully pre-populated winCodeSign cache at {}", versionDir);
+            } else {
+                log.warn("[auto-fix] 7-Zip exited with code {} — output: {}. " +
+                         "Electron-builder will attempt its own extraction.", exitCode,
+                        output.length() > 500 ? output.substring(output.length() - 500) : output);
+            }
+
+        } catch (Exception e) {
+            // Non-fatal: if our pre-fix fails, electron-builder will try its own download.
+            // It may still fail on symlinks, but at least we tried.
+            log.warn("[auto-fix] Failed to pre-populate winCodeSign cache: {}. " +
+                     "Build will proceed — electron-builder may still succeed if Developer Mode is enabled.",
+                    e.getMessage());
+        }
     }
 
     private enum BuildTarget {

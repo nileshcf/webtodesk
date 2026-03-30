@@ -5,6 +5,10 @@ param(
     [string]$GitHubRepo,
     [string]$Registry = "ghcr.io",
     [string]$Tag = "latest",
+    [string]$VersionTag,
+    [switch]$SelectTag,
+    [switch]$ListAvailableTags,
+    [string]$TagIndexFile = ".registry-image-tags.json",
     [string]$ContainerName = "webtodesk-app",
     [int]$HostPort = 7860,
     [int]$ContainerPort = 7860,
@@ -47,16 +51,141 @@ function Confirm-Action {
     return $PSCmdlet.ShouldContinue($Prompt, "Confirm")
 }
 
+function Get-TagHistory {
+    param([string]$IndexPath)
+
+    $default = [ordered]@{
+        schemaVersion = 1
+        images = @()
+    }
+
+    if (-not (Test-Path $IndexPath)) {
+        return $default
+    }
+
+    try {
+        $raw = Get-Content -Path $IndexPath -Raw -ErrorAction Stop
+        if (-not $raw.Trim()) {
+            return $default
+        }
+
+        $parsed = $raw | ConvertFrom-Json -ErrorAction Stop
+        if (-not $parsed) {
+            return $default
+        }
+
+        return [ordered]@{
+            schemaVersion = if ($parsed.schemaVersion) { [int]$parsed.schemaVersion } else { 1 }
+            images = @($parsed.images)
+        }
+    }
+    catch {
+        throw "Failed to parse tag index file '$IndexPath': $($_.Exception.Message)"
+    }
+}
+
+function Resolve-TargetRepo {
+    if ($RegistryRepo) {
+        return $RegistryRepo.Trim()
+    }
+    if ($GitHubRepo) {
+        return "$Registry/$($GitHubRepo.Trim())"
+    }
+    return $null
+}
+
+function Get-RepoHistory {
+    param(
+        [object[]]$Entries,
+        [string]$Repo
+    )
+
+    $filtered = @($Entries | Where-Object { $_ -and ([string]$_.repo -eq $Repo) })
+    return @($filtered | Sort-Object { [DateTime]$_.createdAtUtc } -Descending)
+}
+
+function Show-TagTable {
+    param([object[]]$Entries)
+
+    if (-not $Entries -or $Entries.Count -eq 0) {
+        Write-Host "No indexed versions available." -ForegroundColor DarkYellow
+        return
+    }
+
+    Write-Host "Available versions:" -ForegroundColor Cyan
+    $i = 1
+    foreach ($entry in $Entries) {
+        $created = ""
+        if ($entry.createdAtUtc) {
+            try {
+                $created = ([DateTime]$entry.createdAtUtc).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+            }
+            catch {
+                $created = [string]$entry.createdAtUtc
+            }
+        }
+
+        $digestShort = ""
+        if ($entry.digest -and ([string]$entry.digest).Length -gt 19) {
+            $digestShort = ([string]$entry.digest).Substring(0, 19)
+        } elseif ($entry.digest) {
+            $digestShort = [string]$entry.digest
+        }
+
+        Write-Host ("[{0}] {1,-8} {2,-18} {3,-20} {4}" -f $i, [string]$entry.versionTag, $created, $digestShort, [string]$entry.image) -ForegroundColor White
+        if ($entry.notes) {
+            Write-Host ("      notes: {0}" -f [string]$entry.notes) -ForegroundColor DarkGray
+        }
+        $i++
+    }
+}
+
 function Resolve-ImageRef {
+    param(
+        [string]$TargetRepo,
+        [object[]]$RepoHistory
+    )
+
     if ($Image) {
         return $Image.Trim()
     }
-    if ($RegistryRepo) {
-        return "$($RegistryRepo.Trim()):$Tag"
+
+    if ($VersionTag) {
+        if (-not $TargetRepo) {
+            throw "-VersionTag requires -RegistryRepo or -GitHubRepo unless -Image is provided"
+        }
+        return "${TargetRepo}:$VersionTag"
     }
-    if ($GitHubRepo) {
-        return "$Registry/$($GitHubRepo.Trim()):$Tag"
+
+    if ($SelectTag) {
+        if (-not $TargetRepo) {
+            throw "-SelectTag requires -RegistryRepo or -GitHubRepo unless -Image is provided"
+        }
+        if (-not $RepoHistory -or $RepoHistory.Count -eq 0) {
+            throw "No version history found for '$TargetRepo' in tag index"
+        }
+
+        if ($NonInteractive) {
+            throw "-SelectTag cannot be used with -NonInteractive. Use -VersionTag instead."
+        }
+
+        Show-TagTable -Entries $RepoHistory
+        $selectionRaw = Read-Host "Select version number"
+        if (-not ($selectionRaw -as [int])) {
+            throw "Invalid selection '$selectionRaw'"
+        }
+        $selection = [int]$selectionRaw
+        if ($selection -lt 1 -or $selection -gt $RepoHistory.Count) {
+            throw "Selection out of range. Choose 1..$($RepoHistory.Count)"
+        }
+
+        return [string]$RepoHistory[$selection - 1].image
     }
+
+    if ($TargetRepo) {
+        return "${TargetRepo}:$Tag"
+    }
+
     return $null
 }
 
@@ -69,14 +198,38 @@ $result = [ordered]@{
     healthy = $false
     status = $null
     envFileUsed = $null
+    tagIndexFile = $TagIndexFile
 }
 
 try {
-    $imageRef = Resolve-ImageRef
+    $targetRepo = Resolve-TargetRepo
+    $indexPath = Join-Path $PSScriptRoot $TagIndexFile
+    $tagHistory = Get-TagHistory -IndexPath $indexPath
+    $repoHistory = if ($targetRepo) { Get-RepoHistory -Entries $tagHistory.images -Repo $targetRepo } else { @() }
+
+    if ($ListAvailableTags) {
+        if (-not $targetRepo) {
+            throw "-ListAvailableTags requires -RegistryRepo or -GitHubRepo"
+        }
+
+        Show-TagTable -Entries $repoHistory
+        $result.success = $true
+        $result.image = if ($repoHistory.Count -gt 0) { [string]$repoHistory[0].image } else { $null }
+        $result.availableTags = @($repoHistory | ForEach-Object { [string]$_.versionTag })
+        $result.tagIndexFile = $indexPath
+
+        if ($OutputJson) {
+            $result | ConvertTo-Json -Depth 6
+        }
+        exit 0
+    }
+
+    $imageRef = Resolve-ImageRef -TargetRepo $targetRepo -RepoHistory $repoHistory
     if (-not $imageRef) {
-        throw "Image is required. Use -Image ghcr.io/<user-or-org>/webtodesk:latest or -GitHubRepo <user-or-org>/webtodesk [-Tag latest]"
+        throw "Image is required. Use -Image ghcr.io/<user-or-org>/webtodesk:latest or -GitHubRepo <user-or-org>/webtodesk [-Tag latest|-VersionTag vN|-SelectTag]"
     }
     $result.image = $imageRef
+    $result.tagIndexFile = $indexPath
 
     Write-Info "Checking Docker availability"
     $null = docker info 2>$null
