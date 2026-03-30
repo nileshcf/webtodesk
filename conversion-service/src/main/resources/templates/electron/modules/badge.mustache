@@ -1,22 +1,77 @@
-// Module: badge — Tier: FREE
-// Allows the app to display a badge count on the dock/taskbar icon via IPC.
+// Module: badge — Tier: TRIAL
+// Shows a badge count on the dock/taskbar icon.
+// Adds Quit/Restart quick actions to Windows taskbar Jump List and macOS dock menu.
+// Exposes window.wtdBadge.set(n) / window.wtdBadge.clear() in the renderer.
+
 function setup(mainWindow, config) {
   if (!config.modules?.includes('badge')) return;
 
-  const { ipcMain, app } = require('electron');
+  const { ipcMain, app, Menu } = require('electron');
 
-  ipcMain.on('set-badge-count', (event, count) => {
+  // ── Badge count IPC ────────────────────────────────────────────────────────
+  ipcMain.on('wtd-badge-set', function(event, count) {
     if (typeof count === 'number' && count >= 0) {
-      app.setBadgeCount(count);
+      try { app.setBadgeCount(Math.floor(count)); } catch (_) {}
     }
   });
 
-  ipcMain.on('clear-badge', () => {
-    app.setBadgeCount(0);
+  ipcMain.on('wtd-badge-clear', function() {
+    try { app.setBadgeCount(0); } catch (_) {}
   });
+
+  // ── Windows Jump List — Restart + Quit quick actions ──────────────────────
+  if (process.platform === 'win32') {
+    try {
+      app.setUserTasks([
+        {
+          program: process.execPath,
+          arguments: '--wtd-restart',
+          iconPath: process.execPath,
+          iconIndex: 0,
+          title: 'Restart',
+          description: 'Restart the application'
+        },
+        {
+          program: process.execPath,
+          arguments: '--wtd-quit',
+          iconPath: process.execPath,
+          iconIndex: 0,
+          title: 'Quit',
+          description: 'Quit the application'
+        }
+      ]);
+    } catch (_) {}
+
+    if (process.argv.includes('--wtd-quit')) {
+      app.quit();
+    } else if (process.argv.includes('--wtd-restart')) {
+      app.relaunch({ args: process.argv.slice(1).filter(function(a) { return a !== '--wtd-restart'; }) });
+      app.exit(0);
+    }
+  }
+
+  // ── macOS Dock menu — Restart + Quit ──────────────────────────────────────
+  if (process.platform === 'darwin') {
+    app.whenReady().then(function() {
+      try {
+        app.dock.setMenu(Menu.buildFromTemplate([
+          { label: 'Restart', click: function() { app.relaunch(); app.exit(0); } },
+          { type: 'separator' },
+          { label: 'Quit', click: function() { app.quit(); } }
+        ]));
+      } catch (_) {}
+    });
+  }
 }
 
-function preloadSetup() {}
+function preloadSetup(contextBridge, ipcRenderer, config) {
+  if (!config.modules?.includes('badge')) return;
+
+  contextBridge.exposeInMainWorld('wtdBadge', {
+    set:   function(count) { ipcRenderer.send('wtd-badge-set', count); },
+    clear: function()      { ipcRenderer.send('wtd-badge-clear'); }
+  });
+}
 
 function teardown() {}
 

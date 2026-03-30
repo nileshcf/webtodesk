@@ -1,118 +1,388 @@
-// Module: watermark — Tier: TRIAL / PRO
-// Injects a persistent badge near the native window control buttons.
-// TRIAL: shows "Powered by WebToDesk · N days left" (orange brand).
-// PRO  : shows custom text at a custom position with custom colours.
-//
-// Config (from config.watermark):
-//   text              — string | null.  Null → "Powered by WebToDesk".
-//   position          — "top-left" | "top-right" | "bottom-left" | "bottom-right".
-//                       Default: "top-right" (clears native controls on Win/Linux).
-//   showDaysRemaining — bool.   Append " · N days left" when expiresAt is set.
-//   expiresAt         — ISO-8601 string | null.  Populated by service from ExpiryConfig.
-//   badgeColor        — CSS colour string.  Default: orange brand.
-//   textColor         — CSS colour string.  Default: white.
-//   opacity           — number 0–1.         Default: 1.0.
-//
-// Works on Windows, macOS, Linux (pure CSS + DOM, no platform APIs needed).
+// Module: watermark — Tier: TRIAL
+// Badge  : transparent, frameless, click-through child BrowserWindow over main window.
+//          Loads badge HTML inline (data URL) — no DOM injection, immune to SPA frameworks.
+// PRO overlay: full-screen tiled canvas injected via preloadSetup (renderer-side).
 
-var BADGE_ID = '__wtd-watermark';
+var OVERLAY_ID = '__wtd-wm-overlay';
 
-function setup() {}
+// ── Main process: badge overlay window + IP IPC ───────────────────────────────
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('watermark')) return;
 
-function preloadSetup(contextBridge, ipcRenderer, config) {
-  if (!config.modules || config.modules.indexOf('watermark') === -1) return;
+  var electron    = require('electron');
+  var BrowserWindow = electron.BrowserWindow;
+  var ipcMain     = electron.ipcMain;
+  var os          = require('os');
 
-  var wm = config.watermark || {};
-  var text              = wm.text              || 'Powered by WebToDesk';
-  var position          = wm.position          || 'top-right';
-  var showDaysRemaining = wm.showDaysRemaining !== false;
-  var expiresAt         = wm.expiresAt         || null;
-  var badgeColor        = wm.badgeColor        || 'rgba(234,88,12,0.92)';
-  var textColor         = wm.textColor         || '#ffffff';
-  var opacity           = typeof wm.opacity === 'number' ? wm.opacity : 1.0;
+  // IP IPC handler for PRO canvas overlay (preloadSetup uses ipcRenderer.invoke)
+  ipcMain.handle('wtd-watermark-ip', function() {
+    try {
+      var nets = os.networkInterfaces();
+      var keys = Object.keys(nets);
+      for (var i = 0; i < keys.length; i++) {
+        var iface = nets[keys[i]];
+        for (var j = 0; j < iface.length; j++) {
+          var a = iface[j];
+          if (a.family === 'IPv4' && !a.internal) return a.address;
+        }
+      }
+    } catch (_) {}
+    return '127.0.0.1';
+  });
 
-  // ── Days-remaining label ──────────────────────────────────────────────────
-  if (showDaysRemaining && expiresAt) {
+  var wm        = config.watermark || {};
+  var showBadge = wm.showBadge !== false;
+  if (!showBadge) return;
+
+  var tierLabel  = wm.tierLabel  || 'Trial';
+  var badgeText  = (wm.text && wm.text.trim()) ? wm.text.trim() : tierLabel;
+  var position   = wm.position   || 'top-right';
+  var badgeColor = wm.badgeColor || 'rgba(234,88,12,0.92)';
+  var textColor  = wm.textColor  || '#ffffff';
+  var opacity    = typeof wm.opacity === 'number' ? wm.opacity : 1.0;
+  var showDays   = wm.showDaysRemaining !== false;
+  var expiresAt  = wm.expiresAt || null;
+
+  if (showDays && expiresAt) {
     try {
       var ms   = new Date(expiresAt).getTime() - Date.now();
       var days = Math.max(0, Math.ceil(ms / 86400000));
-      text += ' \u00b7 ' + days + (days === 1 ? ' day left' : ' days left');
+      badgeText += ' \u00b7 ' + days + (days === 1 ? ' day left' : ' days left');
     } catch (_) {}
   }
 
-  // ── Position map (right-side offset clears native window controls) ────────
-  var positionStyles = {
+  var posMap = {
     'top-left'    : 'top:8px;left:8px;',
-    'top-right'   : 'top:8px;right:120px;',   // 120 px clears Win/Linux controls
+    'top-right'   : 'top:8px;right:138px;',
     'bottom-left' : 'bottom:8px;left:8px;',
     'bottom-right': 'bottom:8px;right:8px;'
   };
-  var posStyle = positionStyles[position] || positionStyles['top-right'];
+  var posStyle = posMap[position] || posMap['top-right'];
 
-  // ── Badge CSS ─────────────────────────────────────────────────────────────
-  var css = [
-    'position:fixed',
-    posStyle,
-    'background:' + badgeColor,
-    'color:' + textColor,
-    'padding:2px 10px',
-    'border-radius:12px',
-    'font-size:11px',
-    'font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
-    'font-weight:500',
-    'letter-spacing:0.2px',
-    'line-height:20px',
-    'pointer-events:none',
-    'opacity:' + opacity,
-    'z-index:2147483647',
-    'white-space:nowrap',
-    'user-select:none',
-    '-webkit-user-select:none',
-    'box-shadow:0 1px 4px rgba(0,0,0,0.20)'
-  ].join(';');
+  // ── Build badge HTML (inline data URL — no extra file needed) ─────────────
+  var badgeHtml =
+    '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>' +
+    '* {margin:0;padding:0;box-sizing:border-box;}' +
+    'html,body {background:transparent;overflow:hidden;width:100%;height:100%;}' +
+    '#__wtd-wm-badge {position:fixed;' + posStyle +
+      'background:' + badgeColor + ';color:' + textColor + ';' +
+      'padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;' +
+      'font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;' +
+      'letter-spacing:0.3px;line-height:20px;white-space:nowrap;' +
+      'opacity:' + opacity + ';z-index:2147483647;pointer-events:none;' +
+      'box-shadow:0 2px 8px rgba(0,0,0,0.35);' +
+      '-webkit-app-region:no-drag;}' +
+    '</style></head><body>' +
+    '<div id="__wtd-wm-badge">' + badgeText + '</div>' +
+    '</body></html>';
 
-  // ── Injection ─────────────────────────────────────────────────────────────
-  function injectBadge() {
-    // Idempotent — skip if already present
-    if (document.getElementById(BADGE_ID)) return;
+  // ── Create transparent overlay window ─────────────────────────────────────
+  var overlay = new BrowserWindow({
+    parent: mainWindow,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    resizable: false,
+    movable: false,
+    show: false,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
+  });
 
-    var badge       = document.createElement('div');
-    badge.id        = BADGE_ID;
-    badge.style.cssText = css;
-    badge.textContent   = text;
+  overlay.setIgnoreMouseEvents(true, { forward: true });
+  overlay.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(badgeHtml));
 
-    var root = document.body || document.documentElement;
-    if (root) root.appendChild(badge);
+  // ── Sync overlay bounds to main window content area ───────────────────────
+  function syncBounds() {
+    if (!overlay || overlay.isDestroyed()) return;
+    try {
+      if (mainWindow.isMinimized() || !mainWindow.isVisible()) {
+        overlay.hide();
+        return;
+      }
+      var b = mainWindow.getBounds();
+      overlay.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+      if (!overlay.isVisible()) overlay.show();
+    } catch (_) {}
   }
 
-  // Inject as soon as the DOM is ready
-  if (document.body) {
-    injectBadge();
-  } else {
-    window.addEventListener('DOMContentLoaded', injectBadge);
+  overlay.once('ready-to-show', syncBounds);
+
+  mainWindow.on('move',       syncBounds);
+  mainWindow.on('resize',     syncBounds);
+  mainWindow.on('maximize',   syncBounds);
+  mainWindow.on('unmaximize', syncBounds);
+  mainWindow.on('restore',    syncBounds);
+  mainWindow.on('show',       syncBounds);
+  mainWindow.on('focus',      syncBounds);
+  mainWindow.on('minimize',   function() { if (!overlay.isDestroyed()) overlay.hide(); });
+  mainWindow.on('hide',       function() { if (!overlay.isDestroyed()) overlay.hide(); });
+  mainWindow.on('close',      function() { try { if (!overlay.isDestroyed()) overlay.close(); } catch (_) {} });
+
+  // ── Full-screen tiled TRIAL watermark overlay (expires after 4 minutes) ──────
+  var EXPIRE_MS   = 4 * 60 * 1000;        // 4 minutes total
+  var EXPIRE_SECS = (EXPIRE_MS / 1000).toString();
+  var FADE_START  = Math.floor(EXPIRE_MS * 0.875 / 1000); // fade starts at ~3:30
+
+  var wmHtml =
+    '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>' +
+    '* {margin:0;padding:0;box-sizing:border-box;}' +
+    'html,body {background:transparent;overflow:hidden;width:100%;height:100%;pointer-events:none;}' +
+    '@keyframes wmFade{' +
+      '0%{opacity:0}' +
+      '3%{opacity:1}' +
+      Math.floor(FADE_START / parseInt(EXPIRE_SECS) * 100) + '%{opacity:1}' +
+      '100%{opacity:0}' +
+    '}' +
+    '#g {' +
+      'position:fixed;inset:0;' +
+      'animation:wmFade ' + EXPIRE_SECS + 's linear forwards;' +
+    '}' +
+    '.wrap {' +
+      'position:absolute;' +
+      'inset:-120px;' +
+      'display:flex;flex-wrap:wrap;align-content:flex-start;' +
+      'transform:rotate(-28deg);transform-origin:center;' +
+    '}' +
+    '.item {' +
+      'width:220px;height:72px;' +
+      'display:flex;align-items:center;justify-content:center;gap:8px;' +
+      'flex-shrink:0;' +
+    '}' +
+    '.txt {' +
+      'font-size:12px;font-weight:700;' +
+      'font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;' +
+      'color:rgba(255,255,255,0.13);' +
+      'letter-spacing:3px;text-transform:uppercase;white-space:nowrap;' +
+      'text-shadow:0 1px 4px rgba(0,0,0,0.5);' +
+    '}' +
+    '.sep {' +
+      'width:3px;height:3px;border-radius:50%;' +
+      'background:rgba(255,255,255,0.07);flex-shrink:0;' +
+    '}' +
+    '.sub {' +
+      'font-size:8px;font-weight:600;' +
+      'font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;' +
+      'color:rgba(255,255,255,0.05);' +
+      'letter-spacing:2px;text-transform:uppercase;white-space:nowrap;' +
+    '}' +
+    '</style></head><body>' +
+    '<div id="g"><div class="wrap" id="wm"></div></div>' +
+    '<script>(function(){' +
+    '  var wm=document.getElementById("wm");' +
+    '  var cols=Math.ceil((window.screen.width+280)/220)+3;' +
+    '  var rows=Math.ceil((window.screen.height+280)/72)+3;' +
+    '  var N=cols*rows;' +
+    '  for(var i=0;i<N;i++){' +
+    '    var d=document.createElement("div");d.className="item";' +
+    '    var t=document.createElement("span");t.className="txt";t.textContent="TRIAL";' +
+    '    var sep=document.createElement("div");sep.className="sep";' +
+    '    var s=document.createElement("span");s.className="sub";s.textContent="WebToDesk";' +
+    '    d.appendChild(t);d.appendChild(sep);d.appendChild(s);' +
+    '    wm.appendChild(d);' +
+    '  }' +
+    '})();</script>' +
+    '</body></html>';
+
+  var wmOverlay = new BrowserWindow({
+    parent: mainWindow,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    resizable: false,
+    movable: false,
+    show: false,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
+  });
+
+  wmOverlay.setIgnoreMouseEvents(true, { forward: true });
+  wmOverlay.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(wmHtml));
+
+  function syncWmBounds() {
+    if (!wmOverlay || wmOverlay.isDestroyed()) return;
+    try {
+      if (mainWindow.isMinimized() || !mainWindow.isVisible()) {
+        wmOverlay.hide(); return;
+      }
+      var bw = mainWindow.getBounds();
+      wmOverlay.setBounds({ x: bw.x, y: bw.y, width: bw.width, height: bw.height });
+      if (!wmOverlay.isVisible()) wmOverlay.show();
+    } catch (_) {}
   }
 
-  // Re-inject after SPA navigations that replace DOM body
-  var _push    = history.pushState;
-  var _replace = history.replaceState;
-  history.pushState = function() {
-    _push.apply(this, arguments);
-    setTimeout(injectBadge, 150);
-  };
-  history.replaceState = function() {
-    _replace.apply(this, arguments);
-    setTimeout(injectBadge, 150);
-  };
-  window.addEventListener('popstate', function() {
-    setTimeout(injectBadge, 150);
+  wmOverlay.once('ready-to-show', syncWmBounds);
+
+  mainWindow.on('move',       syncWmBounds);
+  mainWindow.on('resize',     syncWmBounds);
+  mainWindow.on('maximize',   syncWmBounds);
+  mainWindow.on('unmaximize', syncWmBounds);
+  mainWindow.on('restore',    syncWmBounds);
+  mainWindow.on('show',       syncWmBounds);
+  mainWindow.on('focus',      syncWmBounds);
+  mainWindow.on('minimize',   function() { if (!wmOverlay.isDestroyed()) wmOverlay.hide(); });
+  mainWindow.on('hide',       function() { if (!wmOverlay.isDestroyed()) wmOverlay.hide(); });
+  mainWindow.on('close',      function() { try { if (!wmOverlay.isDestroyed()) wmOverlay.close(); } catch (_) {} });
+
+  // Close overlay after 4 min + 2s (CSS fade has already completed by then)
+  setTimeout(function() {
+    try { if (!wmOverlay.isDestroyed()) wmOverlay.close(); } catch (_) {}
+  }, EXPIRE_MS + 2000);
+
+  // ── Dismiss on first user click (sent from preloadSetup via IPC) ─────────
+  try { ipcMain.removeHandler('wtd-wm-dismiss'); } catch (_) {}
+  ipcMain.handle('wtd-wm-dismiss', function() {
+    try { if (!wmOverlay.isDestroyed()) wmOverlay.close(); } catch (_) {}
   });
 }
 
+// ── Renderer: PRO full-screen canvas overlay only (badge is a separate window now) ──
+function preloadSetup(contextBridge, ipcRenderer, config) {
+  if (!config.modules?.includes('watermark')) return;
+
+  // ── Dismiss full-screen watermark on first click anywhere ──────────────────
+  window.addEventListener('mousedown', function() {
+    try { ipcRenderer.invoke('wtd-wm-dismiss'); } catch (_) {}
+  }, { once: true, capture: true });
+
+  var wm            = config.watermark || {};
+  var overlayConfig = wm.overlayWatermark || null;
+
+  // ── Full-screen overlay watermark (PRO/LIFETIME only) ────────────────────
+  if (!overlayConfig || !overlayConfig.enabled) return;
+
+  var oc = overlayConfig;
+
+  // ── Nav-zone awareness shared by canvas overlay AND DRM watermark ─────────
+  var mouseInEdge = false;
+  document.addEventListener('mousemove', function(e) {
+    mouseInEdge = (e.clientX < 80) || (e.clientX > window.innerWidth - 80);
+  }, { passive: true });
+
+  // Resolve IP then build overlay
+  var ipPromise = oc.showIp ? ipcRenderer.invoke('wtd-watermark-ip') : Promise.resolve(null);
+
+  ipPromise.then(function(localIp) {
+    var canvas    = document.createElement('canvas');
+    canvas.id     = OVERLAY_ID;
+    canvas.style.cssText =
+      'position:fixed;top:0;left:0;width:100vw;height:100vh;' +
+      'z-index:2147483646;pointer-events:none;user-select:none;';
+    document.documentElement.appendChild(canvas);
+
+    var order = Array.isArray(oc.order) ? oc.order : ['appName', 'ip', 'time', 'customText'];
+
+    function buildText() {
+      var parts = [];
+      order.forEach(function(key) {
+        if      (key === 'appName'    && oc.showAppName    ) parts.push(config.appTitle || config.projectName || 'App');
+        else if (key === 'ip'         && oc.showIp   && localIp) parts.push(localIp);
+        else if (key === 'time'       && oc.showTime        ) parts.push(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        else if (key === 'customText' && oc.showCustomText && oc.customText) parts.push(oc.customText);
+      });
+      return parts.join('  \u00b7  ');
+    }
+
+    function draw() {
+      var W = window.innerWidth, H = window.innerHeight;
+      canvas.width = W; canvas.height = H;
+      var ctx = canvas.getContext('2d');
+      var text = buildText();
+      if (!text) return;
+
+      var fontSize = oc.fontSize  || 14;
+      var color    = oc.color     || 'rgba(255,255,255,0.15)';
+      var angle    = ((oc.angle   != null ? oc.angle   : -30)) * Math.PI / 180;
+      var spacing  = oc.spacing   || 160;
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.save();
+      ctx.font         = 'bold ' + fontSize + 'px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+      ctx.fillStyle    = color;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.translate(W / 2, H / 2);
+      ctx.rotate(angle);
+
+      var diag = Math.sqrt(W * W + H * H);
+      var cols = Math.ceil(diag / spacing) + 2;
+      var rows = Math.ceil(diag / (spacing * 0.6)) + 2;
+      for (var r = -rows; r <= rows; r++) {
+        for (var c = -cols; c <= cols; c++) {
+          ctx.fillText(text, c * spacing, r * spacing * 0.6);
+        }
+      }
+      ctx.restore();
+    }
+
+    draw();
+    if (oc.showTime) setInterval(draw, 60000);
+    window.addEventListener('resize', draw);
+
+    // ── DRM ghost IP watermark ────────────────────────────────────────────────
+    // Floats at random positions (avoids nav edge zones), fades in/out like
+    // Netflix/Disney+ session watermarks. Appears even without showIp flag.
+    if (localIp) {
+      var DRM_ID   = '__wtd-drm';
+      var EDGE_PX  = 90; // clear nav-arrow zones + small buffer
+
+      var drmEl = document.createElement('div');
+      drmEl.id  = DRM_ID;
+      drmEl.style.cssText =
+        'position:fixed;pointer-events:none;user-select:none;-webkit-user-select:none;' +
+        'z-index:2147483645;white-space:nowrap;' +
+        'font-size:15px;font-weight:500;letter-spacing:5px;text-transform:uppercase;' +
+        'font-family:ui-monospace,"Cascadia Code","SF Mono","Fira Code",monospace;' +
+        'color:rgba(255,255,255,0.20);' +
+        'text-shadow:0 1px 4px rgba(0,0,0,0.4);' +
+        'opacity:0;' +
+        'transition:opacity 0.9s cubic-bezier(0.4,0,0.2,1);' +
+        '-webkit-app-region:no-drag;';
+      drmEl.textContent = localIp;
+      document.documentElement.appendChild(drmEl);
+
+      function drmRandomPos() {
+        var w  = window.innerWidth;
+        var h  = window.innerHeight;
+        var ew = drmEl.offsetWidth  || 180;
+        var eh = drmEl.offsetHeight || 18;
+        var x  = EDGE_PX + Math.random() * Math.max(w - EDGE_PX * 2 - ew, 40);
+        var y  = 75     + Math.random() * Math.max(h - 120 - eh, 40);
+        return { x: x, y: y };
+      }
+
+      function drmShow() {
+        if (mouseInEdge) { setTimeout(drmShow, 600); return; }
+        var pos = drmRandomPos();
+        var rot = (Math.random() * 18 - 9).toFixed(2);
+        drmEl.style.left      = pos.x + 'px';
+        drmEl.style.top       = pos.y + 'px';
+        drmEl.style.transform = 'rotate(' + rot + 'deg)';
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() { drmEl.style.opacity = '1'; });
+        });
+        // Hold 2.8 – 5.4 s then fade out
+        setTimeout(drmHide, 2800 + Math.random() * 2600);
+      }
+
+      function drmHide() {
+        drmEl.style.opacity = '0';
+        // Gap 2.5 – 6 s (after 900ms fade-out completes)
+        setTimeout(drmShow, 900 + 2500 + Math.random() * 3500);
+      }
+
+      // First appearance after page settles
+      setTimeout(drmShow, 1800 + Math.random() * 1200);
+    }
+  }).catch(function() {});
+}
+
 function teardown() {
-  try {
-    var el = document.getElementById(BADGE_ID);
-    if (el) el.remove();
-  } catch (_) {}
+  // Badge and watermark overlay are BrowserWindows — closed via mainWindow 'close' event listener.
 }
 
 module.exports = { setup, preloadSetup, teardown };

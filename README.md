@@ -22,7 +22,7 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 ### Current
 
 - **Website-to-Desktop Conversion** — Paste any URL and generate a ready-to-build Electron project
-- **Server-Side .exe / .deb Building** — Full local execution of `npm install` and `electron-builder` inside Docker to generate `.exe` (Windows via Wine) or `.deb` (Linux) files and stream real-time logs via SSE
+- **Server-Side .exe / .deb / .AppImage Building** — Full local execution of `npm install` and `electron-builder` inside Docker to generate cross-platform installers and stream real-time logs via SSE
 - **Cloud Object Storage** — Automatically uploads generated artifacts to Cloudflare R2 for secure, scalable distribution
 - **Licensing System** — Four-tier licensing model (Trial/Starter/Pro/Lifetime) with build limits and expiry management
 - **OS-Specific Builds** — Cross-platform builds for Windows (.exe/.msi), Linux (.AppImage/.deb/.rpm), and macOS (.dmg/.zip)
@@ -31,7 +31,7 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 - **DevTools Blocking** — Prevents end-users from inspecting or modifying the wrapped app
 - **Version Upgrade System** — Automatic version detection and upgrade with license persistence
 - **License Expiry Enforcement** — Runtime license validation with blocking expiry screen
-- **Feature Module System** — Modular architecture with tier-based feature availability
+- **Feature Module System** — 17 modular features with tier-based availability (TRIAL: 7, STARTER: 15, PRO/Lifetime: 17)
 - **User Authentication** — JWT-based auth with access/refresh token rotation and Redis-backed blacklisting
 - **User Profile Management** — Update username, display name, phone, and avatar
 - **Project Dashboard** — Multi-step wizard with tier selection, OS configuration, and feature toggles
@@ -40,6 +40,10 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 - **Service Discovery** — Eureka-based service registry for automatic microservice routing
 - **API Gateway** — Centralized routing, JWT validation, CORS, and header forwarding
 - **Frontend Integration** — Complete React frontend with TypeScript types and custom hooks
+- **Premium UI Design** — Professional dark theme with glass-morphism, animated gradients, and micro-animations
+- **Template Engine** — Mustache-based Electron project generation with modular injection system
+- **Build Metrics** — Prometheus metrics for build monitoring (started, completed, duration, queue depth)
+- **Security Hardening** — Log injection prevention, proper client IP detection, MDC resource leak fixes
 
 ### Planned
 
@@ -48,10 +52,7 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 - ⚠️ **Password Reset** — Endpoint references exist but no implementation
 - ⚠️ **Admin Panel** — Role enum exists (ROLE_ADMIN) but no admin UI or endpoints
 - ⚠️ **File Upload** — Icon file upload (currently accepts filename string only)
-- ⚠️ **CI/CD Pipeline** — GitHub Actions workflow pending (Week 4)
-- ⚠️ **VersionUpgradeService** — Automatic version upgrade with license persistence (Week 4)
-- ⚠️ **OpenAPI Docs** — Springdoc OpenAPI integration pending (Week 4)
-- ⚠️ **Monitoring & Observability** — Prometheus metrics, structured logging
+- ⚠️ **OpenAPI Docs** — Springdoc OpenAPI integration pending
 
 ---
 
@@ -59,18 +60,19 @@ WebToDesk is a SaaS platform that accepts any website URL and user configuration
 
 | Layer          | Technology                                                        |
 | -------------- | ----------------------------------------------------------------- |
-| **Frontend**   | React 19, TypeScript, Vite 6, TailwindCSS 3, Framer Motion, Axios |
+| **Frontend**   | React 18, TypeScript, Vite 6, TailwindCSS 3, Framer Motion, Axios |
 | **API Gateway**| Spring Cloud Gateway, Spring Security (WebFlux), Eureka Client    |
 | **User Service** | Spring Boot 3.3.6, Spring Data JPA, Spring Security, Redis      |
-| **Conversion Service** | Spring Boot 3.3.6, Spring Data MongoDB, Validation, Licensing |
+| **Conversion Service** | Spring Boot 3.3.6, Spring Data MongoDB, Validation, Licensing, Mustache Templates |
 | **Discovery**  | Spring Cloud Netflix Eureka Server                                |
 | **Auth**       | JWT (jjwt 0.12.3), BCrypt, Redis token blacklisting              |
-| **Databases**  | PostgreSQL (users), MongoDB (conversions), Redis (token blacklist) |
-| **Build**      | Maven multi-module, Vite                                          |
-| **Containers** | Docker (multi-stage builds), Docker Compose                       |
+| **Databases**  | PostgreSQL (users), MongoDB (conversions, build records), Redis (token blacklist) |
+| **Build**      | Maven multi-module (centralized dependency management), Vite      |
+| **Containers** | Docker (multi-stage builds), Docker Compose, Nginx reverse proxy  |
 | **Language**   | Java 17, TypeScript 5.7                                           |
 | **Licensing**  | Tier-based system (Trial/Starter/Pro/Lifetime) with build limits |
 | **Build Queue** | Priority queue system with OS-specific routing                  |
+| **Metrics**    | Micrometer + Prometheus (build metrics, queue depth)             |
 
 ---
 
@@ -193,7 +195,7 @@ npm run dev    # http://localhost:5173
 
 ### 6. Automation Scripts (Windows)
 
-These scripts support both interactive use (for humans) and deterministic non-interactive use (for AI/automation).
+All automation scripts are organized in the project root for easy access. These scripts support both interactive use (for humans) and deterministic non-interactive use (for AI/automation).
 
 - `start-all.ps1` — starts all local services with readiness checks
 - `docker-rebuild.ps1` — rebuilds Docker image with cache/no-cache and cleanup options
@@ -202,6 +204,7 @@ These scripts support both interactive use (for humans) and deterministic non-in
 - `registry-pull-run.ps1` — pull shared registry image and run container directly
 - `git-operations.ps1` — interactive git UI + command-mode actions for automation
 - `ai-doc-sync.ps1` — one-go app-level update brief for `README.md`, `CHANGELOG.md`, `docs/**`, and `skills/**`
+- `test-build.ps1` — quick build verification without full container start
 
 #### Quick Human Usage
 
@@ -297,7 +300,7 @@ docker compose up -d
 
 ## Running Tests
 
-**83 tests passing** across `conversion-service`.
+**216 tests passing** across `conversion-service`.
 
 ```powershell
 # Windows (PowerShell) — conversion-service full suite
@@ -316,7 +319,12 @@ $env:JAVA_HOME = "C:\Program Files\Java\jdk-17"
 | `LicenseServiceTest` | 17 | Tier validation, quota |
 | `ModuleRegistryTest` | 19 | Module tier gating |
 | `TemplateEngineTest` | 7 | Mustache rendering |
-| **Total** | **83** | **All passing** |
+| `BuildMetricsServiceTest` | 14 | Prometheus metrics |
+| `BuildQueueServiceTest` | 14 | Queue management |
+| `BuildServiceTest` | 47 | Build orchestration |
+| `R2StorageServiceTest` | 25 | Cloud storage |
+| `VersionUpgradeServiceTest` | 30 | Version management |
+| **Total** | **216** | **All passing** |
 
 ---
 
@@ -338,6 +346,8 @@ All API calls go through the **API Gateway** at `http://localhost:8080`.
 | `PUT` | `/conversion/conversions/{id}` | Yes | Update a project |
 | `DELETE` | `/conversion/conversions/{id}` | Yes | Delete a project |
 | `POST` | `/conversion/conversions/{id}/generate` | Yes | Generate Electron project files |
+| `GET` | `/actuator/prometheus` | No | Prometheus metrics endpoint |
+| `GET` | `/actuator/health` | No | Health check endpoint |
 
 See [`docs/API_REFERENCE.md`](./docs/API_REFERENCE.md) for complete endpoint documentation.
 
@@ -411,14 +421,14 @@ This project is proprietary software. All rights reserved.
 ### Core Documentation
 - [skills/FEATURES.md](./skills/FEATURES.md) — **Complete feature specifications and licensing system**
 - [skills/conversion-service.md](./skills/conversion-service.md) — **Technical implementation details and architecture**
+- [ARCHITECTURE.md](./docs/ARCHITECTURE.md) — System architecture with Mermaid diagrams
+- [API_REFERENCE.md](./docs/API_REFERENCE.md) — Complete API endpoint reference
+- [DEPLOYMENT.md](./docs/DEPLOYMENT.md) — Production deployment guide
 
 ### Legacy Documentation
-- [ARCHITECTURE.md](./docs/ARCHITECTURE.md) — System architecture with Mermaid diagrams
-- [FILE_STRUCTURE.md](./docs/FILE_STRUCTURE.md) — Annotated file tree
 - [DB_SCHEMA.md](./docs/DB_SCHEMA.md) — Database schema documentation
-- [API_REFERENCE.md](./docs/API_REFERENCE.md) — Complete API endpoint reference
+- [FILE_STRUCTURE.md](./docs/FILE_STRUCTURE.md) — Annotated file tree
 - [SUBSCRIPTION_AND_BILLING.md](./docs/SUBSCRIPTION_AND_BILLING.md) — Billing model documentation
-- [DEPLOYMENT.md](./docs/DEPLOYMENT.md) — Production deployment guide
 - [IMPROVEMENTS.md](./docs/IMPROVEMENTS.md) — Prioritized improvement recommendations
 
 ### Frontend Integration

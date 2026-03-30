@@ -49,7 +49,7 @@ export function BuildProgress({ projectId, onComplete, onFailed }: BuildProgress
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
-    const eventSource = fetchEventSource(`/conversion/conversions/${projectId}/build/stream`, {
+    void fetchEventSource(`/conversion/conversions/${projectId}/build/stream`, {
       headers: { Authorization: `Bearer ${getAccessToken()}` },
       signal: ctrl.signal,
       onmessage(ev) {
@@ -85,8 +85,6 @@ export function BuildProgress({ projectId, onComplete, onFailed }: BuildProgress
 
     return () => {
       ctrl.abort();
-      // Ensure eventSource is properly cleaned up
-      eventSource?.close?.();
     };
   }, [projectId]); // Remove onComplete and onFailed from dependencies
 

@@ -6,6 +6,9 @@ module.exports = {
   websiteUrl: '{{websiteUrl}}',
   iconFile: '{{iconFile}}',
   modules: {{{modulesJson}}},
+{{#hasSplashScreen}}
+  splashScreen: {{{splashScreenConfigJson}}},
+{{/hasSplashScreen}}
 {{#hasDomainLock}}
   domainLock: {{{domainLockConfigJson}}},
 {{/hasDomainLock}}

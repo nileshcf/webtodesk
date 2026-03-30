@@ -864,7 +864,11 @@ public class BuildService {
 
     private Map<String, String> generateFiles(ConversionProject project) {
         LicenseTier tier = project.getTier() != null ? project.getTier() : LicenseTier.TRIAL;
-        List<String> resolved = moduleRegistry.resolveEnabledModules(project.getEnabledModules(), tier, developmentBuild);
+        List<String> resolved = new java.util.ArrayList<>(moduleRegistry.resolveEnabledModules(project.getEnabledModules(), tier, developmentBuild));
+        // Expiry is platform-enforced — always injected unless dev mode
+        if (!developmentBuild && !resolved.contains("expiry")) {
+            resolved.add("expiry");
+        }
 
         StringBuilder requires      = new StringBuilder();
         StringBuilder setups        = new StringBuilder();
@@ -899,7 +903,7 @@ public class BuildService {
         ctx.put("moduleSetups",    setups.toString());
         ctx.put("preloadModuleRequires", preloadReqs.toString());
         ctx.put("preloadModuleSetups",   preloadSetups.toString());
-        applyModuleConfigContext(ctx, resolved, project.getModuleConfig());
+        applyModuleConfigContext(ctx, resolved, project.getModuleConfig(), tier, project.getWebsiteUrl());
 
         // Build-target context — drives platform-specific section in package.mustache
         BuildTarget target = resolveBuildTarget(project);
@@ -930,8 +934,30 @@ public class BuildService {
         return files;
     }
 
+    private static String extractHostname(String url) {
+        if (url == null || url.isBlank()) return null;
+        try {
+            String h = new java.net.URL(url.contains("://") ? url : "https://" + url).getHost();
+            return h.startsWith("www.") ? h.substring(4) : h;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private static void applyModuleConfigContext(Map<String, Object> ctx, List<String> resolved,
-                                                  com.example.conversion_service.dto.ModuleConfig mc) {
+                                                  com.example.conversion_service.dto.ModuleConfig mc,
+                                                  LicenseTier tier, String websiteUrl) {
+        boolean hasSplashScreen = resolved.contains("splash-screen");
+        ctx.put("hasSplashScreen", hasSplashScreen);
+        if (hasSplashScreen) {
+            com.example.conversion_service.dto.ModuleConfig.SplashScreenConfig ssc =
+                    (mc != null && mc.getSplashScreen() != null)
+                    ? mc.getSplashScreen()
+                    : new com.example.conversion_service.dto.ModuleConfig.SplashScreenConfig();
+            if (ssc.getDuration() < 5000) ssc.setDuration(5000);
+            ctx.put("splashScreenConfigJson", toJson(ssc));
+        }
+
         boolean hasDomainLock = resolved.contains("domain-lock");
         ctx.put("hasDomainLock", hasDomainLock);
         if (hasDomainLock) {
@@ -939,6 +965,16 @@ public class BuildService {
                     (mc != null && mc.getDomainLock() != null)
                     ? mc.getDomainLock()
                     : new com.example.conversion_service.dto.ModuleConfig.DomainLockConfig();
+            if (tier == LicenseTier.TRIAL) {
+                // TRIAL: force-lock to the project's own domain — user cannot override
+                String host = extractHostname(websiteUrl);
+                if (host != null) {
+                    dlc.setAllowedDomains(java.util.Collections.singletonList(host));
+                }
+            } else {
+                // STARTER+: free movement — clear any allowedDomains (only blockedDomains apply)
+                dlc.setAllowedDomains(new java.util.ArrayList<>());
+            }
             ctx.put("domainLockConfigJson", toJson(dlc));
         }
 
@@ -949,6 +985,12 @@ public class BuildService {
                     (mc != null && mc.getTitleBar() != null)
                     ? mc.getTitleBar()
                     : new com.example.conversion_service.dto.ModuleConfig.TitleBarConfig();
+            if (tier == LicenseTier.TRIAL) {
+                // TRIAL: always show page tab title; no favicon or version
+                tbc.setShowTabTitle(true);
+                tbc.setShowFavicon(false);
+                tbc.setShowVersion(false);
+            }
             ctx.put("titleBarConfigJson", toJson(tbc));
         }
 
@@ -959,8 +1001,20 @@ public class BuildService {
                     (mc != null && mc.getWatermark() != null)
                     ? mc.getWatermark()
                     : new com.example.conversion_service.dto.ModuleConfig.WatermarkConfig();
+            // Auto-fill expiresAt from expiry module
             if (wmc.getExpiresAt() == null && mc != null && mc.getExpiry() != null) {
                 wmc.setExpiresAt(mc.getExpiry().getExpiresAt());
+            }
+            // Set tier label (e.g. "Trial", "Starter", "Pro")
+            String tierName = tier.name();
+            wmc.setTierLabel(tierName.charAt(0) + tierName.substring(1).toLowerCase());
+            // Tier enforcement
+            if (tier == LicenseTier.TRIAL || tier == LicenseTier.STARTER) {
+                wmc.setShowBadge(true);
+                wmc.setOverlayWatermark(null);
+            } else {
+                // PRO/LIFETIME: showBadge defaults to true if unset
+                if (!wmc.isShowBadge()) wmc.setShowBadge(false); // preserve user choice
             }
             ctx.put("watermarkConfigJson", toJson(wmc));
         }
@@ -968,13 +1022,23 @@ public class BuildService {
         boolean hasExpiry = resolved.contains("expiry");
         ctx.put("hasExpiry", hasExpiry);
         if (hasExpiry) {
+            // Always auto-set expiresAt — not user-configurable
+            long daysToAdd = (tier == LicenseTier.LIFETIME) ? 36500L : 30L;
+            java.time.Instant autoExpiry = java.time.Instant.now().plus(daysToAdd, java.time.temporal.ChronoUnit.DAYS);
             com.example.conversion_service.dto.ModuleConfig.ExpiryConfig ec =
-                    (mc != null && mc.getExpiry() != null)
-                    ? mc.getExpiry()
-                    : new com.example.conversion_service.dto.ModuleConfig.ExpiryConfig();
+                    new com.example.conversion_service.dto.ModuleConfig.ExpiryConfig();
+            ec.setExpiresAt(autoExpiry);
+            ec.setLockMessage("Your access to this application has expired. Contact your administrator for renewal or support.");
+            ec.setUpgradeUrl("https://webtodesk.com");
             ctx.put("expiryConfigJson", toJson(ec));
             ctx.put("lockMessage", ec.getLockMessage());
             ctx.put("upgradeUrl", ec.getUpgradeUrl());
+            // Cross-populate into watermark if it’s also active
+            if (hasWatermark && mc != null && mc.getWatermark() != null
+                    && mc.getWatermark().getExpiresAt() == null) {
+                mc.getWatermark().setExpiresAt(autoExpiry);
+                ctx.put("watermarkConfigJson", toJson(mc.getWatermark()));
+            }
         }
 
         ctx.put("hasNotifications", resolved.contains("notifications"));

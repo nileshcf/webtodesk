@@ -19,6 +19,7 @@ import java.util.List;
 @AllArgsConstructor
 public class ModuleConfig {
 
+    private SplashScreenConfig splashScreen;
     private DomainLockConfig   domainLock;
     private TitleBarConfig     titleBar;
     private WatermarkConfig    watermark;
@@ -29,6 +30,24 @@ public class ModuleConfig {
     private KeyBindingsConfig  keyBindings;
     private WindowPolishConfig windowPolish;
     private ClipboardConfig    clipboard;
+
+    // ── Splash Screen ─────────────────────────────────────────────────────────
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SplashScreenConfig {
+        /** User's logo/brand image URL. Null = show a placeholder icon. */
+        private String logoUrl;
+
+        /** Minimum display duration in ms. Must be >= 5000. Default 5000. */
+        @Builder.Default
+        private int duration = 5000;
+
+        /** Primary accent colour (CSS hex/rgb). Null = default #6C63FF. */
+        private String primaryColor;
+    }
 
     // ── Domain Lock ───────────────────────────────────────────────────────────
 
@@ -85,6 +104,27 @@ public class ModuleConfig {
          * Null = OS default (≈32 px).
          */
         private Integer overlayHeight;
+
+        /**
+         * When true, the website's current page title is appended to the window title
+         * (e.g. "My App — Page Title"). TRIAL: always true (enforced by backend).
+         */
+        @Builder.Default
+        private boolean showTabTitle = true;
+
+        /**
+         * When true, the page's favicon is fetched and used as the window icon.
+         * STARTER+ only — forced false for TRIAL.
+         */
+        @Builder.Default
+        private boolean showFavicon = false;
+
+        /**
+         * When true, the app version string is appended to the window title
+         * (e.g. "My App v1.0.0"). STARTER+ only — forced false for TRIAL.
+         */
+        @Builder.Default
+        private boolean showVersion = false;
     }
 
     // ── Watermark ─────────────────────────────────────────────────────────────
@@ -132,6 +172,46 @@ public class ModuleConfig {
         /** Overall opacity of the badge element (0.0–1.0). */
         @Builder.Default
         private double opacity = 1.0;
+
+        /**
+         * Tier label injected by the build service (e.g. "Trial", "Starter", "Pro").
+         * Not user-configurable — always overwritten.
+         */
+        private String tierLabel;
+
+        /**
+         * When false, the badge is hidden. PRO/LIFETIME only — forced true for TRIAL/STARTER.
+         */
+        @Builder.Default
+        private boolean showBadge = true;
+
+        /**
+         * Full-screen overlay watermark configuration. PRO/LIFETIME only.
+         * Null for TRIAL/STARTER (enforced by backend).
+         */
+        private OverlayWatermarkConfig overlayWatermark;
+
+        @Data
+        @Builder
+        @NoArgsConstructor
+        @AllArgsConstructor
+        public static class OverlayWatermarkConfig {
+            @Builder.Default private boolean enabled      = false;
+            @Builder.Default private boolean showAppName  = true;
+            @Builder.Default private boolean showIp       = false;
+            @Builder.Default private boolean showTime     = false;
+            @Builder.Default private boolean showCustomText = false;
+            private String customText;
+            /** Ordered list of item keys: appName, ip, time, customText */
+            @Builder.Default
+            private java.util.List<String> order = java.util.Arrays.asList("appName", "ip", "time", "customText");
+            @Builder.Default private int    fontSize   = 14;
+            @Builder.Default private String color      = "rgba(255,255,255,0.15)";
+            @Builder.Default private String bgColor    = "transparent";
+            @Builder.Default private double bgOpacity  = 0.0;
+            @Builder.Default private int    angle      = -30;
+            @Builder.Default private int    spacing    = 160;
+        }
     }
 
     // ── Expiry ────────────────────────────────────────────────────────────────

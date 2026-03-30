@@ -1,0 +1,215 @@
+// Module: navigation — Tier: TRIAL
+// Glass back/forward arrows via a transparent child BrowserWindow overlay.
+//
+// Click-through pattern (Electron standard for transparent overlays):
+//   • Overlay is ALWAYS setIgnoreMouseEvents(true, {forward:true})
+//   • {forward:true} means mousemove events fire inside the overlay HTML too
+//   • HTML detects when cursor is directly over a button circle → sends IPC
+//     to flip setIgnoreMouseEvents(false) for that one click only
+//   • Button click handler resets to (true,{forward:true}) before navigating
+//   • This means ONLY the button circle ever consumes a click — everywhere else
+//     passes straight through to the page below.
+//
+// Arrow visibility: 50 ms main-process poll via screen.getCursorScreenPoint()
+// Navigation:       webContents.navigationHistory.goBack/goForward (Electron 38+)
+
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('navigation')) return;
+
+  var electron      = require('electron');
+  var BrowserWindow = electron.BrowserWindow;
+  var ipcMain       = electron.ipcMain;
+  var elScreen      = electron.screen;
+  var fs            = require('fs');
+  var path          = require('path');
+
+  // ── Write overlay preload to disk ─────────────────────────────────────────
+  // Exposes: wtdNav.goBack(), wtdNav.goForward(), wtdNav.setCT(bool)
+  var preloadSrc =
+    '\'use strict\';\n' +
+    'const {contextBridge,ipcRenderer}=require(\'electron\');\n' +
+    'contextBridge.exposeInMainWorld(\'wtdNav\',{\n' +
+    '  goBack:   ()=>ipcRenderer.invoke(\'wtd-nav-back\'),\n' +
+    '  goForward:()=>ipcRenderer.invoke(\'wtd-nav-fwd\'),\n' +
+    '  setCT:    (v)=>ipcRenderer.send(\'wtd-nav-ct\',v),\n' +
+    '});\n';
+  var preloadPath = path.join(__dirname, 'nav-preload.js');
+  try { fs.writeFileSync(preloadPath, preloadSrc, 'utf8'); } catch (_) {}
+
+  // ── IPC: navigate (invoke = request/response) ─────────────────────────────
+  try { ipcMain.removeHandler('wtd-nav-back'); } catch (_) {}
+  try { ipcMain.removeHandler('wtd-nav-fwd');  } catch (_) {}
+  ipcMain.handle('wtd-nav-back', function() {
+    try {
+      if (!mainWindow.isDestroyed()) {
+        var nh = mainWindow.webContents.navigationHistory;
+        if (nh && nh.canGoBack()) nh.goBack();
+      }
+    } catch (_) {}
+  });
+  ipcMain.handle('wtd-nav-fwd', function() {
+    try {
+      if (!mainWindow.isDestroyed()) {
+        var nh = mainWindow.webContents.navigationHistory;
+        if (nh && nh.canGoForward()) nh.goForward();
+      }
+    } catch (_) {}
+  });
+
+  // ── IPC: click-through toggle (send = fire-and-forget) ────────────────────
+  ipcMain.on('wtd-nav-ct', function(event, clickThrough) {
+    try {
+      if (!navOverlay.isDestroyed())
+        navOverlay.setIgnoreMouseEvents(clickThrough, { forward: true });
+    } catch (_) {}
+  });
+
+  // ── Overlay HTML ──────────────────────────────────────────────────────────
+  var html =
+    '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>' +
+    '*{margin:0;padding:0;box-sizing:border-box;}' +
+    'html,body{background:transparent;overflow:hidden;width:100%;height:100%;}' +
+    '.btn{' +
+      'position:absolute;top:50%;' +
+      'width:52px;height:52px;border-radius:50%;' +
+      'display:flex;align-items:center;justify-content:center;' +
+      'background:rgba(0,0,0,0.26);' +
+      'border:1px solid rgba(255,255,255,0.16);' +
+      'backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);' +
+      'box-shadow:0 8px 32px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.1);' +
+      'user-select:none;-webkit-user-select:none;-webkit-app-region:no-drag;' +
+      'cursor:pointer;' +
+      'opacity:0;pointer-events:none;' +
+      'transition:opacity 0.22s ease,transform 0.32s cubic-bezier(0.34,1.56,0.64,1),background 0.15s ease,box-shadow 0.15s ease;' +
+    '}' +
+    '#b{left:16px;transform:translateY(-50%) translateX(-32px) scale(0.8);}' +
+    '#f{right:16px;transform:translateY(-50%) translateX(32px) scale(0.8);}' +
+    '#b.on,#f.on{opacity:0.93;}' +
+    '#b.on{transform:translateY(-50%) translateX(0) scale(1);}' +
+    '#f.on{transform:translateY(-50%) translateX(0) scale(1);}' +
+    '#b.lit,#f.lit{background:rgba(255,255,255,0.18);box-shadow:0 12px 40px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.18);}' +
+    '#b.press,#f.press{transform:translateY(-50%) translateX(0) scale(0.87)!important;transition:transform 0.08s ease!important;}' +
+    '.ico{pointer-events:none;display:flex;align-items:center;justify-content:center;}' +
+    '.ico svg{width:22px;height:22px;fill:none;stroke:rgba(255,255,255,0.9);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;}' +
+    '</style></head><body>' +
+    '<div id="b" class="btn"><span class="ico"><svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></span></div>' +
+    '<div id="f" class="btn"><span class="ico"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></span></div>' +
+    '<script>' +
+    'var B=document.getElementById("b"),F=document.getElementById("f");' +
+    'var _ct=true;' +
+    // Debounced click-through helper
+    'function setCT(v){if(v!==_ct){_ct=v;window.wtdNav&&window.wtdNav.setCT(v);}}' +
+    // Hit-test: is (x,y) inside a circle element?
+    'function hit(el,x,y){var r=el.getBoundingClientRect();var cx=r.left+r.width/2,cy=r.top+r.height/2;var dx=x-cx,dy=y-cy,rad=r.width/2;return dx*dx+dy*dy<=rad*rad;}' +
+    // mousemove forwarded from the page below: only disable CT when over a button
+    'window.addEventListener("mousemove",function(e){' +
+      'var overB=hit(B,e.clientX,e.clientY),overF=hit(F,e.clientX,e.clientY);' +
+      'if(overB||overF){' +
+        'B.classList.toggle("lit",overB);F.classList.toggle("lit",overF);' +
+        'setCT(false);' +
+      '}else{B.classList.remove("lit");F.classList.remove("lit");setCT(true);}' +
+    '},{passive:true});' +
+    'window.addEventListener("mouseleave",function(){B.classList.remove("lit");F.classList.remove("lit");setCT(true);},{passive:true});' +
+    // Clicks: reset CT immediately so YouTube gets subsequent clicks
+    'B.addEventListener("mousedown",function(){B.classList.add("press");});' +
+    'F.addEventListener("mousedown",function(){F.classList.add("press");});' +
+    'B.addEventListener("click",function(){B.classList.remove("press");setCT(true);window.wtdNav&&window.wtdNav.goBack();});' +
+    'F.addEventListener("click",function(){F.classList.remove("press");setCT(true);window.wtdNav&&window.wtdNav.goForward();});' +
+    // Called by main process to show/hide arrows
+    'function wtdShow(s){' +
+      'if(s==="left"){B.classList.add("on");F.classList.remove("on","lit");}' +
+      'else{F.classList.add("on");B.classList.remove("on","lit");}' +
+    '}' +
+    'function wtdHide(){B.classList.remove("on","lit","press");F.classList.remove("on","lit","press");setCT(true);}' +
+    '<\/script></body></html>';
+
+  // ── Create overlay window ──────────────────────────────────────────────────
+  var navOverlay = new BrowserWindow({
+    parent: mainWindow,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    focusable: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    resizable: false,
+    movable: false,
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: false,
+      preload: preloadPath
+    }
+  });
+
+  // Always forward:true — HTML mousemove decides per-pixel click-through
+  navOverlay.setIgnoreMouseEvents(true, { forward: true });
+  navOverlay.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+
+  // ── Sync bounds to main window ────────────────────────────────────────────
+  function syncBounds() {
+    if (!navOverlay || navOverlay.isDestroyed()) return;
+    try {
+      if (mainWindow.isMinimized() || !mainWindow.isVisible()) { navOverlay.hide(); return; }
+      var b = mainWindow.getBounds();
+      navOverlay.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+      if (!navOverlay.isVisible()) navOverlay.show();
+    } catch (_) {}
+  }
+
+  navOverlay.once('ready-to-show', syncBounds);
+  mainWindow.on('move',       syncBounds);
+  mainWindow.on('resize',     syncBounds);
+  mainWindow.on('maximize',   syncBounds);
+  mainWindow.on('unmaximize', syncBounds);
+  mainWindow.on('restore',    syncBounds);
+  mainWindow.on('show',       syncBounds);
+  mainWindow.on('focus',      syncBounds);
+  mainWindow.on('minimize',   function() { if (!navOverlay.isDestroyed()) navOverlay.hide(); });
+  mainWindow.on('hide',       function() { if (!navOverlay.isDestroyed()) navOverlay.hide(); });
+  mainWindow.on('close',      function() { try { if (!navOverlay.isDestroyed()) navOverlay.close(); } catch (_) {} });
+
+  // ── 50 ms poll: show/hide arrows via executeJavaScript ────────────────────
+  // Polling only controls visibility — never touches setIgnoreMouseEvents.
+  var EDGE     = 80;
+  var lastZone = null;
+
+  var poll = setInterval(function() {
+    if (mainWindow.isDestroyed() || navOverlay.isDestroyed()) { clearInterval(poll); return; }
+    try {
+      var cur    = elScreen.getCursorScreenPoint();
+      var bounds = mainWindow.getBounds();
+      var inside =
+        cur.x >= bounds.x && cur.x <= bounds.x + bounds.width &&
+        cur.y >= bounds.y && cur.y <= bounds.y + bounds.height;
+
+      if (!inside) {
+        if (lastZone !== null) {
+          lastZone = null;
+          navOverlay.webContents.executeJavaScript('wtdHide()').catch(function() {});
+        }
+        return;
+      }
+
+      var relX    = cur.x - bounds.x;
+      var newZone = relX < EDGE ? 'left' : (relX > bounds.width - EDGE ? 'right' : null);
+
+      if (newZone !== lastZone) {
+        lastZone = newZone;
+        if (newZone) {
+          navOverlay.webContents.executeJavaScript('wtdShow("' + newZone + '")').catch(function() {});
+        } else {
+          navOverlay.webContents.executeJavaScript('wtdHide()').catch(function() {});
+        }
+      }
+    } catch (_) {}
+  }, 50);
+}
+
+// Navigation is fully handled in setup() — no renderer injection needed.
+function preloadSetup(contextBridge, ipcRenderer, config) {}
+
+function teardown() {}
+
+module.exports = { setup, preloadSetup, teardown };

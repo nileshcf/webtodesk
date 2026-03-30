@@ -29,19 +29,19 @@ public class ModuleRegistry {
         Map<String, ModuleDefinition> m = new LinkedHashMap<>();
         m.put("splash-screen", new ModuleDefinition(
                 "splash-screen", "Splash Screen",
-                "Branded loading screen while the main URL loads",
+                "In-window branded overlay (WebToDesk + your logo) while the app loads. Min 5s, fades out on ready.",
                 LicenseTier.TRIAL, "modules/splash-screen.mustache"));
         m.put("offline", new ModuleDefinition(
                 "offline", "Offline Detection",
-                "Shows a friendly error page when the network connection is lost",
+                "Drops a non-blocking notification island from the top of the window when the network is lost; auto-dismisses on reconnect.",
                 LicenseTier.TRIAL, "modules/offline.mustache"));
         m.put("badge", new ModuleDefinition(
                 "badge", "Badge Count",
-                "Set dock/taskbar badge counter via IPC from the renderer",
+                "Taskbar/dock badge counter via window.wtdBadge IPC. Adds Quit/Restart to Windows Jump List and macOS dock menu.",
                 LicenseTier.TRIAL, "modules/badge.mustache"));
         m.put("domain-lock", new ModuleDefinition(
                 "domain-lock", "Domain Lock",
-                "Restrict navigation to allowed domains and block specified destinations",
+                "TRIAL: auto-locks navigation to your own domain. STARTER+: free movement with a configurable always-blocked list.",
                 LicenseTier.TRIAL, "modules/domain-lock.mustache"));
         m.put("title-bar", new ModuleDefinition(
                 "title-bar", "Title Bar",

@@ -111,7 +111,7 @@ class ExpiryModuleTest {
     @Test
     void expiryJs_containsSetupFunction() {
         String js = renderExpiryModule();
-        assertThat(js).contains("function setup()");
+        assertThat(js).contains("function setup(");  // now has (mainWindow, config) params
     }
 
     @Test

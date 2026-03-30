@@ -1,19 +1,59 @@
-// Module: expiry — Tier: TRIAL
-// Locks the app with a full-screen overlay once the trial expires.
-// The lock screen is non-dismissible and shows an upgrade button.
-//
-// Config (from config.expiry):
-//   expiresAt   — ISO-8601 string | null.  Null = never expires (module is a no-op).
-//   lockMessage — string.  Message body on the lock screen.
-//   upgradeUrl  — string.  URL opened when the user clicks "Upgrade Now".
-//
-// Implementation: preload-only (DOM overlay). No main-process side effects.
-// Works on Windows, macOS, Linux.
+// Module: expiry — Tier: TRIAL (auto-injected by platform into every non-dev build)
+// Baked-in 30-day TTL from build date. Not user-configurable.
+// Locks the app on startup (main process) and during a session (renderer).
 
-var LOCK_ID          = '__wtd-expiry-lock';
-var CHECK_INTERVAL   = 60000; // re-check every 60 s for real-time expiry
+var LOCK_ID        = '__wtd-expiry-lock';
+var CHECK_INTERVAL = 60000; // re-check every 60 s
 
-function setup() {}
+// ── Main process: loads expired.html and blocks navigation when expired ───────
+function setup(mainWindow, config) {
+  if (!config.modules?.includes('expiry')) return;
+
+  var exp        = config.expiry || {};
+  var expiresAt  = exp.expiresAt || null;
+  if (!expiresAt) return;
+
+  var expiryTime = new Date(expiresAt).getTime();
+  if (isNaN(expiryTime)) return;
+
+  var path        = require('path');
+  var expiredPage = path.join(__dirname, '..', 'expired.html');
+
+  function isExpired() { return Date.now() >= expiryTime; }
+
+  function loadLockPage() {
+    try {
+      var cur = mainWindow.webContents.getURL();
+      if (cur && cur.includes('expired.html')) return;
+      mainWindow.loadFile(expiredPage);
+    } catch (_) {}
+  }
+
+  // Block any navigation once locked
+  function preventNavigation(event) { event.preventDefault(); }
+
+  function lockMain() {
+    loadLockPage();
+    mainWindow.webContents.on('will-navigate', preventNavigation);
+    mainWindow.webContents.on('will-redirect', preventNavigation);
+  }
+
+  // Check after each page load so SPA navigations don't bypass the lock
+  mainWindow.webContents.on('did-finish-load', function() {
+    var cur = mainWindow.webContents.getURL();
+    if (cur && cur.includes('expired.html')) return;
+    if (isExpired()) lockMain();
+  });
+
+  // Schedule a precision lock exactly when the TTL fires (max safe setTimeout: ~24.8 days)
+  var msLeft = expiryTime - Date.now();
+  if (msLeft > 0 && msLeft < 2147483647) {
+    setTimeout(function() { if (isExpired()) lockMain(); }, msLeft + 500);
+  } else if (msLeft <= 0) {
+    // Already expired before the main window fully loaded — lock on first paint
+    mainWindow.webContents.once('did-finish-load', function() { lockMain(); });
+  }
+}
 
 function preloadSetup(contextBridge, ipcRenderer, config) {
   if (!config.modules || config.modules.indexOf('expiry') === -1) return;

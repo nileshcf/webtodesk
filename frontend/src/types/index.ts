@@ -54,6 +54,12 @@ export interface BuildStatusResponse {
   updatedAt: string | null;
 }
 
+export interface SplashScreenConfig {
+  logoUrl?: string;
+  duration?: number;
+  primaryColor?: string;
+}
+
 export interface DomainLockConfig {
   allowedDomains?: string[];
   blockedDomains?: string[];
@@ -63,9 +69,28 @@ export interface DomainLockConfig {
 
 export interface TitleBarConfig {
   text?: string;
+  showTabTitle?: boolean;
+  showFavicon?: boolean;
+  showVersion?: boolean;
   overlayColor?: string;
   symbolColor?: string;
   overlayHeight?: number;
+}
+
+export interface OverlayWatermarkConfig {
+  enabled?: boolean;
+  showAppName?: boolean;
+  showIp?: boolean;
+  showTime?: boolean;
+  showCustomText?: boolean;
+  customText?: string;
+  order?: string[];
+  fontSize?: number;
+  color?: string;
+  bgColor?: string;
+  bgOpacity?: number;
+  angle?: number;
+  spacing?: number;
 }
 
 export interface WatermarkConfig {
@@ -75,6 +100,9 @@ export interface WatermarkConfig {
   badgeColor?: string;
   textColor?: string;
   opacity?: number;
+  showBadge?: boolean;
+  tierLabel?: string;
+  overlayWatermark?: OverlayWatermarkConfig;
 }
 
 export interface ExpiryConfig {
@@ -112,6 +140,7 @@ export interface ClipboardConfig {
 }
 
 export interface ModuleConfig {
+  splashScreen?: SplashScreenConfig;
   domainLock?: DomainLockConfig;
   titleBar?: TitleBarConfig;
   watermark?: WatermarkConfig;

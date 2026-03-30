@@ -140,7 +140,7 @@ class WatermarkModuleTest {
     @Test
     void watermarkJs_containsSetupFunction() {
         String js = renderWatermarkModule();
-        assertThat(js).contains("function setup()");
+        assertThat(js).contains("function setup(");  // now has (mainWindow, config) params
     }
 
     @Test
@@ -173,8 +173,9 @@ class WatermarkModuleTest {
     @Test
     void watermarkJs_injectsBadgeElement() {
         String js = renderWatermarkModule();
-        assertThat(js).contains("createElement");
-        assertThat(js).contains("__wtd-watermark");
+        // Badge is now in a transparent child BrowserWindow, not DOM injection
+        assertThat(js).contains("BrowserWindow");
+        assertThat(js).contains("__wtd-wm-badge");  // id inside badge HTML string
     }
 
     @Test
@@ -194,7 +195,7 @@ class WatermarkModuleTest {
     void watermarkJs_topRightIsDefaultPosition() {
         String js = renderWatermarkModule();
         assertThat(js).contains("top-right");
-        assertThat(js).contains("right:120px");
+        assertThat(js).contains("right:138px");  // clears Win11 window controls in title bar
     }
 
     @Test
@@ -208,23 +209,24 @@ class WatermarkModuleTest {
     @Test
     void watermarkJs_handlesSpaNavigation() {
         String js = renderWatermarkModule();
-        assertThat(js).contains("pushState");
-        assertThat(js).contains("replaceState");
-        assertThat(js).contains("popstate");
+        // Badge is a child BrowserWindow — it follows main window via syncBounds, not history API
+        assertThat(js).contains("syncBounds");
+        assertThat(js).contains("getBounds");
     }
 
     @Test
     void watermarkJs_idempotentInjection() {
         String js = renderWatermarkModule();
-        // injectBadge must check for existing element before inserting
-        assertThat(js).contains("getElementById");
-        assertThat(js).contains("__wtd-watermark");
+        // Overlay window guarded by isDestroyed() — safe to call syncBounds repeatedly
+        assertThat(js).contains("isDestroyed");
+        assertThat(js).contains("__wtd-wm-badge");  // id present in badge HTML string
     }
 
     @Test
     void watermarkJs_brandTextFallback() {
         String js = renderWatermarkModule();
-        assertThat(js).contains("Powered by WebToDesk");
+        // Text now falls back to tierLabel (set by backend) or hardcoded 'Trial'
+        assertThat(js).contains("tierLabel");
     }
 
     // ─── 5. preload.js — injection for watermark ─────────────────────────────

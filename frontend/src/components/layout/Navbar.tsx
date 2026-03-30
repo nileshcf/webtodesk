@@ -92,6 +92,13 @@ export default function Navbar() {
 
             <div className="w-px h-4 bg-white/[0.08] mx-2" />
 
+            <Link
+              to="/module-lab"
+              className="px-3 py-1.5 rounded-lg text-[13px] text-white/50 hover:text-white hover:bg-white/[0.04] transition-all duration-300"
+            >
+              Module Lab
+            </Link>
+
             {isAuthenticated ? (
               <>
                 <Link
@@ -193,9 +200,17 @@ export default function Navbar() {
                     {label}
                   </button>
                 ))}
-
+  
                 <div className="h-px bg-white/[0.06] my-2" />
-
+  
+                <Link
+                  to="/module-lab"
+                  onClick={() => setMobileOpen(false)}
+                  className="text-sm text-white/60 hover:text-white py-2 px-3 rounded-lg hover:bg-white/[0.04] transition-all"
+                >
+                  Module Lab
+                </Link>
+  
                 {isAuthenticated ? (
                   <>
                     <Link

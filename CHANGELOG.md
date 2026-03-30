@@ -4,6 +4,61 @@ All notable changes to this project are documented in this file.
 
 ---
 
+## [1.9.0] - 2026-03-30 — Electron Module Overhaul: Navigation, DRM Watermark & Expiry Auto-Inject
+
+### Overview
+
+Major enhancement to the Electron app generation pipeline. Introduced a new `navigation` module with glass-morphism back/forward arrows, a DRM-style floating IP watermark identical to Netflix/Disney+ session watermarks, and automatic expiry injection into every non-dev build. All three existing modules (splash screen, badge, full-screen watermark) were rewritten to use native `BrowserWindow` overlays instead of DOM injection, making them immune to SPA framework resets and strict Content Security Policies (e.g. YouTube).
+
+### Added
+
+- **`navigation` module** (TRIAL tier): Chrome-style glass back/forward arrows rendered in a transparent child `BrowserWindow` overlay.
+  - Uses `screen.getCursorScreenPoint()` polling (50 ms) — bypasses page CSP entirely.
+  - Correct Electron transparent-overlay click pattern: `setIgnoreMouseEvents(true, {forward:true})` always; per-pixel circle hit-test in overlay HTML flips click-through off only when cursor is directly over a button, then immediately resets.
+  - Writes a minimal `nav-preload.js` to `__dirname` at runtime for IPC bridge (`wtdNav.goBack`, `wtdNav.goForward`, `wtdNav.setCT`).
+  - Uses `webContents.navigationHistory.goBack/goForward` (Electron 38+ API) with `canGoBack/canGoForward` guards.
+  - Spring animation (`cubic-bezier(0.34,1.56,0.64,1)`), lit/press states, arrows aware of nav-zone (never spawns DRM watermark in left/right 90 px edges).
+  - Registered in `ModuleRegistry` at TRIAL tier.
+
+- **DRM ghost IP watermark** (PRO `overlayWatermark`): floating session watermark identical in behaviour to DRM streaming platforms.
+  - Resolves local IPv4 via `wtd-watermark-ip` IPC → `os.networkInterfaces()`.
+  - Appears at a random position (avoiding nav-arrow edge zones), random rotation (−9°→+9°), monospace font, `rgba(255,255,255,0.20)`, `letter-spacing:5px`.
+  - Cycle: fade-in 0.9 s → hold 2.8–5.4 s → fade-out 0.9 s → gap 2.5–6 s → new position.
+  - Nav-zone aware: defers spawn when cursor is in the left/right 80 px navigation zones.
+
+- **`electron-build.md` Windsurf rule** (`.windsurf/rules/`): architecture contract for all Electron module injection patterns, approved BrowserWindow overlay patterns, IPC conventions, CSP-safe injection rules.
+
+- **`local-test-build.ps1`** (repo root): PowerShell script that generates a complete test Electron app (`test-local-app/`) from the Mustache templates, installs deps, and launches — enabling rapid local iteration without a full Docker build.
+
+### Changed
+
+- **`splash-screen` module**: rewritten as a native `BrowserWindow` loading `data:text/html` — no DOM injection, survives YouTube/SPA redirects.
+- **`watermark` module** (badge + overlay):
+  - Badge is now a transparent, frameless, click-through child `BrowserWindow` synced to main window bounds via `getBounds()` (covers title bar row, `right:138px` from edge).
+  - Full-screen TRIAL overlay is a separate `BrowserWindow` with tiled diagonal CSS watermark; auto-closes at 4 minutes + CSS fade starts at 3:30.
+  - Click-to-dismiss: `mousedown` listener in `preloadSetup` invokes `wtd-wm-dismiss` IPC → main process closes the overlay `BrowserWindow` permanently.
+  - PRO canvas overlay (`overlayWatermark`) now also renders the DRM ghost IP watermark when `showIp:true`.
+  - Shared `mouseInEdge` tracker feeds both canvas overlay and DRM watermark.
+- **`expiry` module**: `BuildService` now auto-injects expiry into every non-dev build; `expiresAt` auto-set at build time (30 days TRIAL/STARTER/PRO, 100 years LIFETIME). Expiry config removed from frontend UI — it is no longer user-configurable.
+- **`expired.html.mustache`**: redesigned locked screen with WebToDesk branding, admin contact message, and ad space placeholder.
+- **`ProjectWizard.tsx`**: removed `ExpiryPanel` and expiry from `ALL_MODULES`; watermark days-remaining hint updated; tier-aware badge colour in config summary.
+- **`ModuleConfig.java`**: added `OverlayWatermarkConfig` inner class with `enabled`, `showIp`, `showAppName`, `showTime`, `showCustomText`, `customText`, `fontSize`, `color`, `angle`, `spacing`, `order` fields.
+
+### Fixed
+
+- Navigation arrows were invisible on YouTube due to strict `style-src` CSP blocking `<style>` tag injection — resolved by switching to BrowserWindow overlay.
+- `webContents.goBack/goForward` deprecation warnings in Electron 38 — replaced with `navigationHistory` API throughout.
+- `setIgnoreMouseEvents(false)` on the entire edge zone was blocking all clicks in the strip — fixed with per-pixel hit-test pattern.
+- `wtd-watermark-ip` IPC handler missing after BrowserWindow rewrite — re-added to `watermark.setup()`.
+
+### Tests
+
+- **216 / 216 tests pass** (`conversion-service` only — no Spring context required).
+- `WatermarkModuleTest`: updated 4 assertions to match BrowserWindow overlay architecture (`__wtd-wm-badge`, `right:138px`, `syncBounds`, `getBounds`).
+- `ExpiryModuleTest`: updated `setup()` signature to `(mainWindow, config)`.
+
+---
+
 ## [1.8.1] - 2026-03-30 — Maven Configuration Centralization & Security Hardening
 
 ### Overview

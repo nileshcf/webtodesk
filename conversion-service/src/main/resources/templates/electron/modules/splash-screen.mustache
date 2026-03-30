@@ -1,57 +1,111 @@
-// Module: splash-screen — Tier: FREE
-// Shows a branded splash window while the main app URL is loading.
+// Module: splash-screen — Tier: TRIAL
+// Shows a branded BrowserWindow before revealing the main window.
+// Entirely main-process: no DOM injection, no preload work.
+// Works on any URL (YouTube, SPAs, etc.) because the splash is a separate OS window.
+
 function setup(mainWindow, config) {
   if (!config.modules?.includes('splash-screen')) return;
 
-  const { BrowserWindow } = require('electron');
-  const path = require('path');
+  var sc       = config.splashScreen || {};
+  var minMs    = Math.max(Number(sc.duration) || 5000, 5000);
+  var primary  = sc.primaryColor || '#6C63FF';
+  var appTitle = config.appTitle || 'Loading...';
+  var progSecs = (minMs / 1000 * 0.9).toFixed(1);
 
-  const splash = new BrowserWindow({
-    width: 400,
-    height: 300,
-    transparent: true,
+  var BrowserWindow = require('electron').BrowserWindow;
+
+  // ── Build splash HTML (inline — no extra file needed) ─────────────────────
+  var logoBlock =
+    '<div style="width:48px;height:48px;border-radius:14px;' +
+      'background:linear-gradient(135deg,' + primary + ',' + primary + '88);' +
+      'display:flex;align-items:center;justify-content:center;' +
+      'margin-bottom:6px;font-size:20px;color:white;">&#128187;</div>';
+
+  var html =
+    '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>' +
+    '* {margin:0;padding:0;box-sizing:border-box;}' +
+    'body {background:linear-gradient(135deg,#0d0d1a 0%,#1a1030 45%,#0d1520 100%);' +
+      'color:white;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;' +
+      'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+      'height:100vh;overflow:hidden;user-select:none;-webkit-app-region:drag;}' +
+    '.o1{position:absolute;width:380px;height:380px;border-radius:50%;' +
+      'background:' + primary + ';filter:blur(90px);opacity:0.13;top:-140px;left:-100px;' +
+      'animation:f 7s ease-in-out infinite;pointer-events:none;}' +
+    '.o2{position:absolute;width:260px;height:260px;border-radius:50%;' +
+      'background:#3B82F6;filter:blur(80px);opacity:0.10;bottom:-80px;right:-60px;' +
+      'animation:f 7s ease-in-out infinite reverse;animation-delay:-3.5s;pointer-events:none;}' +
+    '.row{display:flex;align-items:center;gap:20px;margin-bottom:32px;position:relative;z-index:1;}' +
+    '.card{display:flex;flex-direction:column;align-items:center;gap:5px;padding:15px 18px;' +
+      'border-radius:18px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);' +
+      'backdrop-filter:blur(12px);min-width:108px;}' +
+    '.wico{width:38px;height:38px;border-radius:9px;' +
+      'background:linear-gradient(135deg,#6C63FF,#3B82F6);' +
+      'display:flex;align-items:center;justify-content:center;' +
+      'font-size:16px;font-weight:800;color:white;margin-bottom:5px;}' +
+    '.lb{font-size:11px;font-weight:700;color:rgba(255,255,255,0.85);letter-spacing:0.2px;' +
+      'max-width:108px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;}' +
+    '.sb{font-size:8px;color:rgba(255,255,255,0.28);letter-spacing:0.8px;text-transform:uppercase;}' +
+    '.sep{display:flex;flex-direction:column;align-items:center;gap:3px;}' +
+    '.sl{width:1px;height:18px;background:rgba(255,255,255,0.07);}' +
+    '.sx{font-size:10px;color:rgba(255,255,255,0.15);}' +
+    '.pw{width:160px;height:2px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;position:relative;z-index:1;}' +
+    '#pb{height:100%;width:0%;background:linear-gradient(90deg,' + primary + ',#3B82F6);' +
+      'animation:p ' + progSecs + 's ease-in-out forwards;}' +
+    '#ll{margin-top:8px;font-size:9px;color:rgba(255,255,255,0.22);letter-spacing:1.2px;' +
+      'text-transform:uppercase;position:relative;z-index:1;}' +
+    '@keyframes f{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(10px,8px) scale(1.04);}}' +
+    '@keyframes p{0%{width:0%}30%{width:40%}65%{width:72%}85%{width:88%}100%{width:95%}}' +
+    '</style></head><body>' +
+    '<div class="o1"></div><div class="o2"></div>' +
+    '<div class="row">' +
+      '<div class="card"><div class="wico">W</div>' +
+        '<span class="lb">WebToDesk</span><span class="sb">platform</span></div>' +
+      '<div class="sep"><div class="sl"></div><span class="sx">&times;</span><div class="sl"></div></div>' +
+      '<div class="card">' + logoBlock +
+        '<span class="lb">' + appTitle + '</span><span class="sb">your app</span></div>' +
+    '</div>' +
+    '<div class="pw"><div id="pb"></div></div>' +
+    '<div id="ll">Loading.</div>' +
+    '<script>(function(){var l=document.getElementById("ll"),d=0;' +
+      'setInterval(function(){d=(d+1)%4;l.textContent="Loading"+".".repeat(d||1);},420);' +
+    '})();</script>' +
+    '</body></html>';
+
+  // ── Create splash window ───────────────────────────────────────────────────
+  var splash = new BrowserWindow({
+    width: 520, height: 360,
     frame: false,
+    center: true,
+    resizable: false,
+    movable: false,
     alwaysOnTop: true,
-    webPreferences: { nodeIntegration: false, contextIsolation: true }
+    skipTaskbar: true,
+    show: false,
+    backgroundColor: '#0d0d1a',
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
   });
 
-  splash.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <style>
-        body { margin: 0; display: flex; flex-direction: column; align-items: center;
-               justify-content: center; height: 100vh;
-               background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-               color: white; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-               border-radius: 12px; }
-        h2 { font-size: 22px; margin: 0 0 8px; }
-        p  { font-size: 13px; opacity: 0.8; margin: 0; }
-        .spinner { width: 32px; height: 32px; border: 3px solid rgba(255,255,255,0.3);
-                   border-top-color: #fff; border-radius: 50%;
-                   animation: spin 0.8s linear infinite; margin-bottom: 16px; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-      </style>
-    </head>
-    <body>
-      <div class="spinner"></div>
-      <h2>${config?.appTitle || 'Loading...'}</h2>
-      <p>Please wait...</p>
-    </body>
-    </html>
-  `));
+  splash.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  splash.once('ready-to-show', function() { splash.show(); });
 
-  mainWindow.once('ready-to-show', () => {
-    splash.destroy();
-    mainWindow.show();
-  });
+  // ── Control main window show timing ───────────────────────────────────────
+  // Remove the default ready-to-show listener added in main.js so we control when
+  // the main window becomes visible (not before the splash min-duration).
+  mainWindow.removeAllListeners('ready-to-show');
 
-  mainWindow.webContents.once('did-finish-load', () => {
-    setTimeout(() => {
-      if (!splash.isDestroyed()) splash.destroy();
-      if (!mainWindow.isVisible()) mainWindow.show();
-    }, 500);
-  });
+  var timerDone = false;
+  var pageDone  = false;
+
+  function tryFinish() {
+    if (!timerDone || !pageDone) return;
+    try { if (!splash.isDestroyed()) splash.close(); } catch (_) {}
+    try { if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) mainWindow.show(); } catch (_) {}
+  }
+
+  setTimeout(function() { timerDone = true; tryFinish(); }, minMs);
+  mainWindow.once('ready-to-show', function() { pageDone = true; tryFinish(); });
+  // Hard fallback — never leave the user staring at a splash forever
+  setTimeout(function() { timerDone = true; pageDone = true; tryFinish(); }, minMs + 12000);
 }
 
 function preloadSetup() {}

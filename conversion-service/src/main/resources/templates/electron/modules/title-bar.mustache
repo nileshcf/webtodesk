@@ -1,51 +1,81 @@
 // Module: title-bar — Tier: TRIAL
-// Enforces a custom window title that survives page navigations and dynamic
-// <title> updates. Optionally colourises the native Windows DWM title bar.
-// Config (from config.titleBar):
-//   text          — string | null.  Window title; null → falls back to config.appTitle.
-//   overlayColor  — hex string | null.  Windows DWM title-bar background (e.g. "#1e1e2e").
-//   symbolColor   — hex string | null.  Windows DWM button / symbol colour.
-//   overlayHeight — number | null.     Windows DWM title-bar height in px.
+// TRIAL:    window title = "{appTitle} — {pageTitle}" (page tab title always appended).
+// STARTER+: showTabTitle toggle, showFavicon (uses page favicon as window icon),
+//           showVersion (appends " vX.X.X"), Windows DWM overlay colour options.
 
 function setup(mainWindow, config) {
   if (!config.modules?.includes('title-bar')) return;
 
   const {
     text          = null,
+    showTabTitle  = true,
+    showFavicon   = false,
+    showVersion   = false,
     overlayColor  = null,
     symbolColor   = null,
     overlayHeight = null
   } = config.titleBar || {};
 
-  // Resolve title with best-effort fallback chain
-  const title = (typeof text === 'string' && text.trim().length > 0)
+  const baseTitle = (typeof text === 'string' && text.trim().length > 0)
     ? text.trim()
     : (config.appTitle || config.projectName || 'App');
 
-  // Apply immediately, then re-apply after every page load so the website's
-  // own <title> element cannot override the app title.
-  function applyTitle() {
-    try { mainWindow.setTitle(title); } catch (_) {}
+  const versionSuffix = (showVersion && config.currentVersion)
+    ? ' v' + config.currentVersion
+    : '';
+
+  function buildTitle(pageTitle) {
+    var base = baseTitle + versionSuffix;
+    if (showTabTitle && typeof pageTitle === 'string' && pageTitle.trim().length > 0) {
+      return base + ' \u2014 ' + pageTitle.trim();
+    }
+    return base;
   }
 
-  applyTitle();
-  mainWindow.webContents.on('did-finish-load', applyTitle);
+  function applyTitle(pageTitle) {
+    try { mainWindow.setTitle(buildTitle(pageTitle || '')); } catch (_) {}
+  }
 
-  // Suppress renderer-triggered title changes (e.g. via document.title = ...)
-  mainWindow.webContents.on('page-title-updated', (event) => {
-    event.preventDefault();
-    applyTitle();
+  // Set initial title immediately
+  applyTitle('');
+
+  // After each page load, read the actual page title and apply
+  mainWindow.webContents.on('did-finish-load', function() {
+    mainWindow.webContents.executeJavaScript('document.title')
+      .then(function(t) { applyTitle(t || ''); })
+      .catch(function()  { applyTitle(''); });
   });
 
-  // Windows: colourize the native DWM title bar when overlay options provided.
-  // Requires the BrowserWindow to have been created with titleBarOverlay:true;
-  // the call is silently swallowed when that option is absent.
+  // Intercept renderer-side title changes
+  mainWindow.webContents.on('page-title-updated', function(event, pageTitle) {
+    event.preventDefault();
+    applyTitle(showTabTitle ? (pageTitle || '') : '');
+  });
+
+  // ── Favicon → window icon (STARTER+ only) ─────────────────────────────────
+  if (showFavicon) {
+    var nativeImage = require('electron').nativeImage;
+    mainWindow.webContents.on('page-favicon-updated', function(event, favicons) {
+      if (!favicons || favicons.length === 0) return;
+      var url = favicons[0];
+      mainWindow.webContents.session.fetch(url)
+        .then(function(res) { return res.arrayBuffer(); })
+        .then(function(buf) {
+          var img = nativeImage.createFromBuffer(Buffer.from(buf));
+          if (!img.isEmpty()) {
+            try { mainWindow.setIcon(img); } catch (_) {}
+          }
+        })
+        .catch(function() {});
+    });
+  }
+
+  // ── Windows DWM title-bar colour overlay ──────────────────────────────────
   if (process.platform === 'win32') {
-    const overlay = {};
+    var overlay = {};
     if (overlayColor  != null) overlay.color       = overlayColor;
     if (symbolColor   != null) overlay.symbolColor = symbolColor;
     if (overlayHeight != null) overlay.height      = overlayHeight;
-
     if (Object.keys(overlay).length > 0) {
       try { mainWindow.setTitleBarOverlay(overlay); } catch (_) {}
     }
@@ -59,6 +89,7 @@ function teardown(mainWindow) {
   try {
     mainWindow.webContents.removeAllListeners('did-finish-load');
     mainWindow.webContents.removeAllListeners('page-title-updated');
+    mainWindow.webContents.removeAllListeners('page-favicon-updated');
   } catch (_) {}
 }
 

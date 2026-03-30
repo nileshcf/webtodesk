@@ -4,10 +4,11 @@ import { Monitor, Globe, Tag, Cpu, ChevronRight, ChevronLeft, Check, X } from 'l
 import { LicenseTier } from '../types/license';
 import type {
   ModuleConfig,
+  SplashScreenConfig,
   DomainLockConfig,
   TitleBarConfig,
   WatermarkConfig,
-  ExpiryConfig,
+  OverlayWatermarkConfig,
   SystemTrayConfig,
   RightClickConfig,
   AutoUpdateConfig,
@@ -49,13 +50,12 @@ interface ProjectWizardProps {
 // ─── Static module catalogue (mirrors ModuleRegistry.java) ──
 
 const ALL_MODULES: ModuleInfo[] = [
-  { key: 'splash-screen', name: 'Splash Screen',     description: 'Branded loading screen while the main URL loads',                                    requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: false },
+  { key: 'splash-screen', name: 'Splash Screen',     description: 'Branded loading screen while the main URL loads',                                    requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: true  },
   { key: 'offline',       name: 'Offline Detection', description: 'Shows a friendly error page when the network connection is lost',                    requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: false },
   { key: 'badge',         name: 'Badge Count',       description: 'Set dock/taskbar badge counter via IPC from the renderer',                          requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: false },
   { key: 'domain-lock',   name: 'Domain Lock',       description: 'Restrict navigation to allowed domains and block specified destinations',             requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: true  },
   { key: 'title-bar',     name: 'Title Bar',         description: 'Set a custom window title that persists across page navigations',                    requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: true  },
   { key: 'watermark',     name: 'Watermark Badge',   description: 'Persistent badge near window controls showing trial status and days remaining',       requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: true  },
-  { key: 'expiry',        name: 'Trial Expiry',      description: 'Locks the app with a full-screen overlay after a specified expiry date',             requiredTier: LicenseTier.TRIAL, available: true,  hasConfig: true  },
   { key: 'notifications',  name: 'Native Notifications',  description: 'Grants the Notification permission so the web Notifications API works natively', requiredTier: LicenseTier.STARTER, available: false, hasConfig: false },
   { key: 'system-tray',    name: 'System Tray',            description: 'Adds a tray icon with tooltip and configurable context menu',                   requiredTier: LicenseTier.STARTER, available: false, hasConfig: true  },
   { key: 'dark-mode',      name: 'Dark / Light Mode Sync', description: 'Syncs OS dark/light theme to web content via IPC and CSS class injection',      requiredTier: LicenseTier.STARTER, available: false, hasConfig: false },
@@ -64,7 +64,7 @@ const ALL_MODULES: ModuleInfo[] = [
   { key: 'key-bindings',   name: 'Custom Key Bindings',    description: 'Registers configurable in-app keyboard shortcuts (reload, back, fullscreen…)',  requiredTier: LicenseTier.STARTER, available: false, hasConfig: true  },
   { key: 'window-polish',  name: 'Window Polish',          description: 'Applies visual enhancements: acrylic/vibrancy blur, always-on-top, opacity',    requiredTier: LicenseTier.STARTER, available: false, hasConfig: true  },
   { key: 'clipboard',      name: 'Clipboard Integration',  description: 'Exposes clipboard read/write to the renderer via a secure contextBridge API',    requiredTier: LicenseTier.STARTER, available: false, hasConfig: true  },
-  { key: 'screen-protect', name: 'Screen Protection',      description: 'OS-level content protection to prevent screenshots and recordings',             requiredTier: LicenseTier.PRO,     available: false, hasConfig: false },
+  { key: 'screen-protect', name: 'Screen Protection',      description: 'OS-level content protection to prevent screenshots and recordings (Windows & macOS only — no-op on Linux)', requiredTier: LicenseTier.PRO, available: false, hasConfig: false },
   { key: 'deep-link',      name: 'Deep Link',              description: 'Register a custom URL protocol so the app can be launched via myapp:// links',  requiredTier: LicenseTier.PRO,     available: false, hasConfig: false },
 ];
 
@@ -165,18 +165,67 @@ function TagInput({
 const cfgInput = 'w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs text-white/80 placeholder:text-white/25 outline-none focus:border-[#6C63FF]/40 transition-colors';
 const cfgLabel = 'block text-[10px] font-bold text-white/35 uppercase tracking-wider mb-1.5';
 
-function DomainLockPanel({ cfg, onChange }: { cfg: DomainLockConfig; onChange: (p: Partial<DomainLockConfig>) => void }) {
+function SplashScreenPanel({ cfg, onChange }: { cfg: SplashScreenConfig; onChange: (p: Partial<SplashScreenConfig>) => void }) {
+  const minDuration = Math.max(Number(cfg.duration) || 5000, 5000);
   return (
     <div className="space-y-3">
       <div>
-        <p className={cfgLabel}>Allowed Domains</p>
-        <TagInput values={cfg.allowedDomains ?? []} onChange={v => onChange({ allowedDomains: v })} placeholder="e.g. example.com — press Enter" />
-        <p className="mt-1 text-[10px] text-white/20">Empty = allow all (except blocked). App base domain always allowed.</p>
+        <p className={cfgLabel}>Logo URL <span className="normal-case font-normal text-white/25">(optional)</span></p>
+        <input type="url" value={cfg.logoUrl ?? ''} onChange={e => onChange({ logoUrl: e.target.value || undefined })} placeholder="https://yourapp.com/logo.png" className={cfgInput} />
+        <p className="mt-1 text-[10px] text-white/20">Your brand logo shown next to the WebToDesk logo. Leave blank for default app icon.</p>
       </div>
       <div>
-        <p className={cfgLabel}>Blocked Domains</p>
-        <TagInput values={cfg.blockedDomains ?? []} onChange={v => onChange({ blockedDomains: v })} placeholder="e.g. ads.example.com — press Enter" />
+        <p className={cfgLabel}>Min Duration <span className="normal-case font-normal text-white/25">({Math.round(minDuration / 1000)}s)</span></p>
+        <input
+          type="range" min="5000" max="15000" step="500"
+          value={minDuration}
+          onChange={e => onChange({ duration: parseInt(e.target.value) })}
+          className="w-full accent-[#6C63FF]"
+        />
+        <p className="mt-1 text-[10px] text-white/20">Minimum time the splash screen is shown. Always waits for app to finish loading regardless.</p>
       </div>
+      <div>
+        <p className={cfgLabel}>Accent Color</p>
+        <div className="flex items-center gap-2">
+          <input type="color" value={cfg.primaryColor ?? '#6C63FF'} onChange={e => onChange({ primaryColor: e.target.value })} className="h-8 w-10 cursor-pointer rounded border border-white/[0.08] bg-transparent" />
+          <input type="text" value={cfg.primaryColor ?? '#6C63FF'} onChange={e => onChange({ primaryColor: e.target.value })} placeholder="#6C63FF" className={`${cfgInput} flex-1`} />
+        </div>
+        <p className="mt-1 text-[10px] text-white/20">Glow orb and progress bar accent colour matching your brand.</p>
+      </div>
+    </div>
+  );
+}
+
+function DomainLockPanel({
+  cfg, onChange, userTier, websiteUrl,
+}: {
+  cfg: DomainLockConfig;
+  onChange: (p: Partial<DomainLockConfig>) => void;
+  userTier: LicenseTier;
+  websiteUrl: string;
+}) {
+  const isTrial = userTier === LicenseTier.TRIAL;
+  const lockedHost = websiteUrl
+    ? websiteUrl.replace(/^https?:\/\/(www\.)?/, '').split('/')[0].split('?')[0]
+    : null;
+
+  return (
+    <div className="space-y-3">
+      {isTrial ? (
+        <div className="rounded-xl border border-[#6C63FF]/20 bg-[#6C63FF]/[0.06] px-3 py-2.5">
+          <p className="text-[10px] font-bold text-[#6C63FF]/70 uppercase tracking-wider mb-1">Auto-locked (Free tier)</p>
+          <p className="text-[11px] text-white/55">
+            Navigation is restricted to <span className="font-mono text-white/80">{lockedHost ?? 'your domain'}</span> only.
+            Upgrade to Starter to allow free movement.
+          </p>
+        </div>
+      ) : (
+        <div>
+          <p className={cfgLabel}>Always-blocked domains</p>
+          <TagInput values={cfg.blockedDomains ?? []} onChange={v => onChange({ blockedDomains: v })} placeholder="e.g. ads.example.com — press Enter" />
+          <p className="mt-1 text-[10px] text-white/20">Navigation to these domains is always blocked, regardless of where the app navigates.</p>
+        </div>
+      )}
       <div>
         <p className={cfgLabel}>Block Message</p>
         <input type="text" value={cfg.blockMessage ?? ''} onChange={e => onChange({ blockMessage: e.target.value })} placeholder="Navigation to this destination is not allowed." className={cfgInput} />
@@ -192,25 +241,140 @@ function DomainLockPanel({ cfg, onChange }: { cfg: DomainLockConfig; onChange: (
   );
 }
 
-function TitleBarPanel({ cfg, onChange }: { cfg: TitleBarConfig; onChange: (p: Partial<TitleBarConfig>) => void }) {
+function TitleBarPanel({
+  cfg, onChange, userTier,
+}: {
+  cfg: TitleBarConfig;
+  onChange: (p: Partial<TitleBarConfig>) => void;
+  userTier: LicenseTier;
+}) {
+  const isTrial = userTier === LicenseTier.TRIAL;
   return (
-    <div>
-      <p className={cfgLabel}>Window Title</p>
-      <input type="text" value={cfg.text ?? ''} onChange={e => onChange({ text: e.target.value })} placeholder="Leave blank to use App Title" className={cfgInput} />
-      <p className="mt-1 text-[10px] text-white/20">Overrides the native window title and persists across page navigations.</p>
+    <div className="space-y-3">
+      <div>
+        <p className={cfgLabel}>Window Title</p>
+        <input type="text" value={cfg.text ?? ''} onChange={e => onChange({ text: e.target.value })} placeholder="Leave blank to use App Title" className={cfgInput} />
+        <p className="mt-1 text-[10px] text-white/20">Persists across page navigations.</p>
+      </div>
+
+      {isTrial ? (
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
+          <p className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-1">Tab title always visible (Free tier)</p>
+          <p className="text-[11px] text-white/40">Window shows <span className="font-mono text-white/60">App Title — Page Title</span>. Upgrade to Starter to control tab title visibility, add favicon, or show version.</p>
+        </div>
+      ) : (
+        <>
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <Toggle checked={cfg.showTabTitle !== false} onChange={v => onChange({ showTabTitle: v })} />
+            <div>
+              <span className="text-xs font-medium text-white/70">Show page tab title</span>
+              <p className="text-[10px] text-white/25 mt-0.5">Appends the website’s current page title — e.g. <span className="font-mono">My App — Dashboard</span></p>
+            </div>
+          </label>
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <Toggle checked={cfg.showFavicon === true} onChange={v => onChange({ showFavicon: v })} />
+            <div>
+              <span className="text-xs font-medium text-white/70">Use page favicon as window icon</span>
+              <p className="text-[10px] text-white/25 mt-0.5">Fetches the website’s favicon and sets it as the native window icon.</p>
+            </div>
+          </label>
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <Toggle checked={cfg.showVersion === true} onChange={v => onChange({ showVersion: v })} />
+            <div>
+              <span className="text-xs font-medium text-white/70">Show version in title</span>
+              <p className="text-[10px] text-white/25 mt-0.5">Appends the app version — e.g. <span className="font-mono">My App v1.2.0</span></p>
+            </div>
+          </label>
+        </>
+      )}
+
+      <p className="text-[9px] font-bold text-white/20 uppercase tracking-widest pt-1">Windows 11 Title-Bar Theming</p>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <p className={cfgLabel}>Bar Color</p>
+          <div className="flex items-center gap-1.5">
+            <input type="color" value={cfg.overlayColor ?? '#1e1e2e'} onChange={e => onChange({ overlayColor: e.target.value })} className="h-7 w-8 cursor-pointer rounded border border-white/[0.08] bg-transparent flex-shrink-0" />
+            <input type="text" value={cfg.overlayColor ?? ''} onChange={e => onChange({ overlayColor: e.target.value || undefined })} placeholder="#1e1e2e" className={`${cfgInput} flex-1`} />
+          </div>
+        </div>
+        <div>
+          <p className={cfgLabel}>Symbol Color</p>
+          <div className="flex items-center gap-1.5">
+            <input type="color" value={cfg.symbolColor ?? '#cdd6f4'} onChange={e => onChange({ symbolColor: e.target.value })} className="h-7 w-8 cursor-pointer rounded border border-white/[0.08] bg-transparent flex-shrink-0" />
+            <input type="text" value={cfg.symbolColor ?? ''} onChange={e => onChange({ symbolColor: e.target.value || undefined })} placeholder="#cdd6f4" className={`${cfgInput} flex-1`} />
+          </div>
+        </div>
+      </div>
+      <div>
+        <p className={cfgLabel}>Bar Height <span className="normal-case font-normal text-white/25">(px, default 32)</span></p>
+        <input type="number" min={28} max={60} value={cfg.overlayHeight ?? ''} onChange={e => onChange({ overlayHeight: e.target.value ? parseInt(e.target.value) : undefined })} placeholder="32" className={cfgInput} />
+      </div>
     </div>
   );
 }
 
 const WM_POSITIONS = ['top-right', 'top-left', 'bottom-right', 'bottom-left'] as const;
+const OVERLAY_ITEMS = ['appName', 'ip', 'time', 'customText'] as const;
+const OVERLAY_LABELS: Record<string, string> = { appName: 'App Name', ip: 'IP Address', time: 'Current Time', customText: 'Custom Text' };
 
-function WatermarkPanel({ cfg, onChange }: { cfg: WatermarkConfig; onChange: (p: Partial<WatermarkConfig>) => void }) {
+function getItemOn(key: string, ow: OverlayWatermarkConfig): boolean {
+  if (key === 'appName') return ow.showAppName !== false;
+  if (key === 'ip')         return ow.showIp         === true;
+  if (key === 'time')       return ow.showTime       === true;
+  if (key === 'customText') return ow.showCustomText === true;
+  return false;
+}
+function setItemOn(key: string, v: boolean): Partial<OverlayWatermarkConfig> {
+  if (key === 'appName')    return { showAppName: v };
+  if (key === 'ip')         return { showIp: v };
+  if (key === 'time')       return { showTime: v };
+  if (key === 'customText') return { showCustomText: v };
+  return {};
+}
+
+function WatermarkPanel({
+  cfg, onChange, userTier,
+}: {
+  cfg: WatermarkConfig;
+  onChange: (p: Partial<WatermarkConfig>) => void;
+  userTier: LicenseTier;
+}) {
+  const TIER_RANK: Record<LicenseTier, number> = {
+    [LicenseTier.TRIAL]: 0, [LicenseTier.STARTER]: 1,
+    [LicenseTier.PRO]: 2,   [LicenseTier.LIFETIME]: 3,
+  };
+  const isPro = TIER_RANK[userTier] >= TIER_RANK[LicenseTier.PRO];
   const pos = cfg.position ?? 'top-right';
+  const ow: OverlayWatermarkConfig = cfg.overlayWatermark ?? {};
+  const order: string[] = ow.order?.length ? ow.order : [...OVERLAY_ITEMS];
+
+  function patchOverlay(p: Partial<OverlayWatermarkConfig>) {
+    onChange({ overlayWatermark: { ...ow, ...p } });
+  }
+  function moveItem(idx: number, dir: -1 | 1) {
+    const next = [...order];
+    [next[idx], next[idx + dir]] = [next[idx + dir], next[idx]];
+    patchOverlay({ order: next });
+  }
+
   return (
     <div className="space-y-3">
+
+      {/* PRO: show/hide badge toggle */}
+      {isPro && (
+        <label className="flex items-center gap-2.5 cursor-pointer">
+          <Toggle checked={cfg.showBadge !== false} onChange={v => onChange({ showBadge: v })} />
+          <div>
+            <span className="text-xs font-medium text-white/70">Show tier badge near window controls</span>
+            <p className="text-[10px] text-white/25 mt-0.5">TRIAL/STARTER: always visible. PRO can hide it.</p>
+          </div>
+        </label>
+      )}
+
+      {/* Badge text + position */}
       <div>
         <p className={cfgLabel}>Badge Text</p>
-        <input type="text" value={cfg.text ?? ''} onChange={e => onChange({ text: e.target.value })} placeholder='Leave blank → "Powered by WebToDesk"' className={cfgInput} />
+        <input type="text" value={cfg.text ?? ''} onChange={e => onChange({ text: e.target.value })} placeholder="Leave blank → tier name (Trial / Starter / Pro)" className={cfgInput} />
       </div>
       <div>
         <p className={cfgLabel}>Position</p>
@@ -224,41 +388,155 @@ function WatermarkPanel({ cfg, onChange }: { cfg: WatermarkConfig; onChange: (p:
       </div>
       <label className="flex items-center gap-2.5 cursor-pointer">
         <Toggle checked={cfg.showDaysRemaining !== false} onChange={v => onChange({ showDaysRemaining: v })} />
-        <span className="text-xs font-medium text-white/70">Show days remaining <span className="text-white/30">(requires Trial Expiry module)</span></span>
+        <span className="text-xs font-medium text-white/70">Show days remaining <span className="text-white/30">(auto-linked to 30-day app TTL)</span></span>
       </label>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <p className={cfgLabel}>Badge Color</p>
+          <div className="flex items-center gap-1.5">
+            <input type="color" value={cfg.badgeColor ?? '#ea580c'} onChange={e => onChange({ badgeColor: e.target.value })} className="h-7 w-8 cursor-pointer rounded border border-white/[0.08] bg-transparent flex-shrink-0" />
+            <input type="text" value={cfg.badgeColor ?? ''} onChange={e => onChange({ badgeColor: e.target.value || undefined })} placeholder="#ea580c" className={`${cfgInput} flex-1`} />
+          </div>
+        </div>
+        <div>
+          <p className={cfgLabel}>Text Color</p>
+          <div className="flex items-center gap-1.5">
+            <input type="color" value={cfg.textColor ?? '#ffffff'} onChange={e => onChange({ textColor: e.target.value })} className="h-7 w-8 cursor-pointer rounded border border-white/[0.08] bg-transparent flex-shrink-0" />
+            <input type="text" value={cfg.textColor ?? ''} onChange={e => onChange({ textColor: e.target.value || undefined })} placeholder="#ffffff" className={`${cfgInput} flex-1`} />
+          </div>
+        </div>
+      </div>
+      <div>
+        <p className={cfgLabel}>Badge Opacity <span className="normal-case font-normal text-white/25">({Math.round((cfg.opacity ?? 1.0) * 100)}%)</span></p>
+        <input type="range" min="0.3" max="1.0" step="0.05" value={cfg.opacity ?? 1.0} onChange={e => onChange({ opacity: parseFloat(e.target.value) })} className="w-full accent-[#6C63FF]" />
+      </div>
+
+      {/* PRO: full-screen overlay watermark */}
+      {isPro && (
+        <>
+          <p className="text-[9px] font-bold text-white/20 uppercase tracking-widest pt-2 border-t border-white/[0.04]">Full-Screen Overlay Watermark</p>
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <Toggle checked={ow.enabled === true} onChange={v => patchOverlay({ enabled: v })} />
+            <span className="text-xs font-medium text-white/70">Enable overlay watermark</span>
+          </label>
+
+          {ow.enabled && (
+            <div className="space-y-2">
+              {/* Reorderable items */}
+              <p className={cfgLabel}>Content <span className="normal-case font-normal text-white/25">(toggle on/off · drag order)</span></p>
+              <div className="space-y-1">
+                {order.map((key, idx) => (
+                  <div key={key} className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.02] px-2.5 py-1.5">
+                    <Toggle checked={getItemOn(key, ow)} onChange={v => patchOverlay(setItemOn(key, v))} />
+                    <span className="flex-1 text-[11px] text-white/70">{OVERLAY_LABELS[key]}</span>
+                    {key === 'customText' && getItemOn(key, ow) && (
+                      <input
+                        type="text"
+                        value={ow.customText ?? ''}
+                        onChange={e => patchOverlay({ customText: e.target.value })}
+                        placeholder="Enter value"
+                        className={`${cfgInput} w-28 text-[10px] py-0.5`}
+                      />
+                    )}
+                    <div className="flex flex-col gap-0 flex-shrink-0">
+                      <button type="button" disabled={idx === 0} onClick={() => moveItem(idx, -1)}
+                        className="text-[9px] text-white/20 hover:text-white/60 disabled:opacity-20 leading-tight px-1">▲</button>
+                      <button type="button" disabled={idx === order.length - 1} onClick={() => moveItem(idx, 1)}
+                        className="text-[9px] text-white/20 hover:text-white/60 disabled:opacity-20 leading-tight px-1">▼</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Styling */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <div>
+                  <p className={cfgLabel}>Text Color <span className="normal-case font-normal text-white/25">(CSS/rgba)</span></p>
+                  <input type="text" value={ow.color ?? 'rgba(255,255,255,0.15)'}
+                    onChange={e => patchOverlay({ color: e.target.value })}
+                    placeholder="rgba(255,255,255,0.15)" className={cfgInput} />
+                </div>
+                <div>
+                  <p className={cfgLabel}>Font Size <span className="normal-case font-normal text-white/25">(px)</span></p>
+                  <input type="number" min={8} max={48} value={ow.fontSize ?? 14}
+                    onChange={e => patchOverlay({ fontSize: parseInt(e.target.value) || 14 })}
+                    className={cfgInput} />
+                </div>
+              </div>
+              <div>
+                <p className={cfgLabel}>Angle <span className="normal-case font-normal text-white/25">({ow.angle ?? -30}°)</span></p>
+                <input type="range" min="-90" max="0" step="5" value={ow.angle ?? -30}
+                  onChange={e => patchOverlay({ angle: parseInt(e.target.value) })} className="w-full accent-[#6C63FF]" />
+              </div>
+              <div>
+                <p className={cfgLabel}>Tile Spacing <span className="normal-case font-normal text-white/25">({ow.spacing ?? 160}px)</span></p>
+                <input type="range" min="80" max="320" step="10" value={ow.spacing ?? 160}
+                  onChange={e => patchOverlay({ spacing: parseInt(e.target.value) })} className="w-full accent-[#6C63FF]" />
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
-function ExpiryPanel({ cfg, onChange }: { cfg: ExpiryConfig; onChange: (p: Partial<ExpiryConfig>) => void }) {
-  const localDt = cfg.expiresAt ? new Date(cfg.expiresAt).toISOString().substring(0, 16) : '';
-  return (
-    <div className="space-y-3">
-      <div>
-        <p className={cfgLabel}>Expiry Date & Time</p>
-        <input type="datetime-local" value={localDt} onChange={e => onChange({ expiresAt: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className={cfgInput} />
-        <p className="mt-1 text-[10px] text-white/20">App locks with a full-screen overlay at this time. Leave blank to disable.</p>
-      </div>
-      <div>
-        <p className={cfgLabel}>Lock Message</p>
-        <input type="text" value={cfg.lockMessage ?? ''} onChange={e => onChange({ lockMessage: e.target.value })} placeholder="Your trial has expired. Please upgrade to continue." className={cfgInput} />
-      </div>
-      <div>
-        <p className={cfgLabel}>Upgrade URL</p>
-        <input type="url" value={cfg.upgradeUrl ?? ''} onChange={e => onChange({ upgradeUrl: e.target.value })} placeholder="https://webtodesk.com/pricing" className={cfgInput} />
-      </div>
-    </div>
-  );
-}
+const TRAY_ACTIONS = ['show', 'hide', 'toggle', 'reload', 'quit', 'separator'] as const;
 
 function SystemTrayPanel({ cfg, onChange }: { cfg: SystemTrayConfig; onChange: (p: Partial<SystemTrayConfig>) => void }) {
+  const items = cfg.items ?? [];
+  const updateItem = (idx: number, patch: { label?: string; action?: string; type?: string }) => {
+    const next = items.map((it, i) => i === idx ? { ...it, ...patch } : it);
+    onChange({ items: next });
+  };
+  const addItem = () => onChange({ items: [...items, { label: '', action: 'show', type: 'item' }] });
+  const addSep  = () => onChange({ items: [...items, { type: 'separator', label: '', action: 'separator' }] });
+  const removeItem = (idx: number) => onChange({ items: items.filter((_, i) => i !== idx) });
+
   return (
     <div className="space-y-3">
       <div>
         <p className={cfgLabel}>Tray Tooltip</p>
         <input type="text" value={cfg.tooltip ?? ''} onChange={e => onChange({ tooltip: e.target.value })} placeholder="Leave blank to use App Title" className={cfgInput} />
       </div>
-      <p className="text-[10px] text-white/20">Show / Hide and Quit items are always included. Additional items can be added via code.</p>
+      <div>
+        <p className={cfgLabel}>Custom Menu Items <span className="normal-case font-normal text-white/25">(Show &amp; Quit always included)</span></p>
+        <div className="space-y-1.5">
+          {items.map((item, i) => (
+            <div key={i} className="flex items-center gap-2">
+              {item.type === 'separator' ? (
+                <div className="flex-1 flex items-center gap-2">
+                  <div className="flex-1 h-px bg-white/10 rounded" />
+                  <span className="text-[10px] text-white/20">separator</span>
+                  <div className="flex-1 h-px bg-white/10 rounded" />
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={item.label ?? ''}
+                    onChange={e => updateItem(i, { label: e.target.value })}
+                    placeholder="Label"
+                    className={`${cfgInput} flex-1`}
+                  />
+                  <select
+                    value={item.action ?? 'show'}
+                    onChange={e => updateItem(i, { action: e.target.value })}
+                    className={`${cfgInput} w-28`}
+                  >
+                    {TRAY_ACTIONS.filter(a => a !== 'separator').map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </>
+              )}
+              <button type="button" onClick={() => removeItem(i)} className="text-white/25 hover:text-red-400 transition-colors flex-shrink-0"><X size={13} /></button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 mt-1.5">
+          <button type="button" onClick={addItem} className="text-[11px] text-[#6C63FF]/60 hover:text-[#6C63FF] transition-colors">+ Add item</button>
+          <button type="button" onClick={addSep}  className="text-[11px] text-white/25 hover:text-white/50 transition-colors">+ Separator</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -362,19 +640,21 @@ function ClipboardPanel({ cfg, onChange }: { cfg: ClipboardConfig; onChange: (p:
 }
 
 function ModuleConfigPanel({
-  moduleKey, config, onChange,
+  moduleKey, config, onChange, userTier, websiteUrl,
 }: {
   moduleKey: string;
   config: ModuleConfig;
   onChange: (mc: ModuleConfig) => void;
+  userTier: LicenseTier;
+  websiteUrl: string;
 }) {
   function patch<T>(key: keyof ModuleConfig, p: Partial<T>) {
     onChange({ ...config, [key]: { ...(config[key] as T), ...p } });
   }
-  if (moduleKey === 'domain-lock')   return <DomainLockPanel   cfg={config.domainLock   ?? {}} onChange={p => patch<DomainLockConfig>  ('domainLock',   p)} />;
-  if (moduleKey === 'title-bar')     return <TitleBarPanel     cfg={config.titleBar     ?? {}} onChange={p => patch<TitleBarConfig>    ('titleBar',     p)} />;
-  if (moduleKey === 'watermark')     return <WatermarkPanel    cfg={config.watermark    ?? {}} onChange={p => patch<WatermarkConfig>   ('watermark',    p)} />;
-  if (moduleKey === 'expiry')        return <ExpiryPanel       cfg={config.expiry       ?? {}} onChange={p => patch<ExpiryConfig>      ('expiry',       p)} />;
+  if (moduleKey === 'splash-screen') return <SplashScreenPanel cfg={config.splashScreen ?? {}} onChange={p => patch<SplashScreenConfig>('splashScreen', p)} />;
+  if (moduleKey === 'domain-lock')   return <DomainLockPanel   cfg={config.domainLock   ?? {}} onChange={p => patch<DomainLockConfig>  ('domainLock',   p)} userTier={userTier} websiteUrl={websiteUrl} />;
+  if (moduleKey === 'title-bar')     return <TitleBarPanel     cfg={config.titleBar     ?? {}} onChange={p => patch<TitleBarConfig>    ('titleBar',     p)} userTier={userTier} />;
+  if (moduleKey === 'watermark')     return <WatermarkPanel    cfg={config.watermark    ?? {}} onChange={p => patch<WatermarkConfig>   ('watermark',    p)} userTier={userTier} />;
   if (moduleKey === 'system-tray')   return <SystemTrayPanel   cfg={config.systemTray   ?? {}} onChange={p => patch<SystemTrayConfig>  ('systemTray',   p)} />;
   if (moduleKey === 'right-click')   return <RightClickPanel   cfg={config.rightClick   ?? {}} onChange={p => patch<RightClickConfig>  ('rightClick',   p)} />;
   if (moduleKey === 'auto-update')   return <AutoUpdatePanel   cfg={config.autoUpdate   ?? {}} onChange={p => patch<AutoUpdateConfig>  ('autoUpdate',   p)} />;
@@ -560,6 +840,11 @@ function FeaturesStep({
                         {devMode && <span className="text-[9px] font-bold text-amber-400/60 uppercase tracking-wider">dev</span>}
                       </div>
                       <p className="mt-0.5 text-[11px] text-white/30 leading-relaxed line-clamp-2">{mod.description}</p>
+                      {mod.key === 'deep-link' && data.projectName && (
+                        <p className="mt-1 text-[10px] font-mono text-[#6C63FF]/50">
+                          {data.projectName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'yourapp'}://
+                        </p>
+                      )}
                       {!accessible && !devMode && (
                         <p className="mt-1 text-[10px] font-medium text-amber-400/60">Requires {mod.requiredTier} plan</p>
                       )}
@@ -577,6 +862,8 @@ function FeaturesStep({
                         moduleKey={mod.key}
                         config={data.moduleConfig}
                         onChange={mc => onChange({ moduleConfig: mc })}
+                        userTier={userTier}
+                        websiteUrl={data.websiteUrl}
                       />
                     </div>
                   )}
@@ -620,6 +907,12 @@ function FeaturesStep({
 // ─── Step 3 — Review ────────────────────────────────────
 
 function moduleConfigSummary(key: string, mc: ModuleConfig): string | null {
+  if (key === 'splash-screen') {
+    const ss = mc.splashScreen ?? {};
+    const secs = Math.max(Number(ss.duration) || 5000, 5000) / 1000;
+    const color = ss.primaryColor || '#6C63FF';
+    return `${secs}s · ${color}${ss.logoUrl ? ' · custom logo' : ''}`;
+  }
   if (key === 'domain-lock') {
     const dl = mc.domainLock ?? {};
     const allow = dl.allowedDomains?.length ? dl.allowedDomains.join(', ') : 'all';
@@ -634,12 +927,7 @@ function moduleConfigSummary(key: string, mc: ModuleConfig): string | null {
     const days = wm.showDaysRemaining !== false ? ' · days remaining' : '';
     return `${text} · ${pos}${days}`;
   }
-  if (key === 'expiry') {
-    const ex = mc.expiry ?? {};
-    return ex.expiresAt
-      ? `expires ${new Date(ex.expiresAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}`
-      : 'no expiry set';
-  }
+  if (key === 'expiry') return 'auto 30-day TTL from build date';
   if (key === 'system-tray')   return mc.systemTray?.tooltip ? `tooltip: "${mc.systemTray.tooltip}"` : 'default tooltip';
   if (key === 'right-click')   return mc.rightClick?.disable !== false ? 'disabled' : 'minimal native menu';
   if (key === 'auto-update')   return mc.autoUpdate?.feedUrl ? mc.autoUpdate.feedUrl : 'no feed URL';

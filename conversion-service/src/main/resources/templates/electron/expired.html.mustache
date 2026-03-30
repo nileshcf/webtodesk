@@ -3,163 +3,202 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{appTitle}} — Trial Expired</title>
+  <title>{{appTitle}} — Access Expired</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
     body {
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: #0a0a0f;
-      color: #f5f5f7;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #09090e;
+      color: #f0f0f5;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       -webkit-font-smoothing: antialiased;
       overflow: hidden;
+      -webkit-app-region: drag;
+      user-select: none;
     }
 
-    /* Background gradient mesh */
     body::before {
       content: '';
-      position: fixed;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
+      position: fixed; inset: 0;
       background:
-        radial-gradient(ellipse 60% 40% at 50% 0%, rgba(234, 88, 12, 0.08), transparent),
-        radial-gradient(ellipse 40% 50% at 80% 70%, rgba(99, 102, 241, 0.05), transparent),
-        radial-gradient(ellipse 50% 40% at 20% 80%, rgba(168, 85, 247, 0.04), transparent);
+        radial-gradient(ellipse 55% 35% at 20% 10%,  rgba(108, 99, 255, 0.07), transparent),
+        radial-gradient(ellipse 45% 45% at 80% 80%,  rgba(234, 88,  12, 0.06), transparent),
+        radial-gradient(ellipse 60% 30% at 50% 100%, rgba(99, 102, 241, 0.04), transparent);
       pointer-events: none;
-      z-index: 0;
     }
 
-    .container {
-      position: relative;
-      z-index: 1;
-      text-align: center;
-      max-width: 420px;
-      padding: 0 24px;
+    /* ── Top bar ── */
+    .topbar {
+      position: relative; z-index: 1;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .brand {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; font-weight: 700; letter-spacing: 0.3px;
+      color: rgba(255,255,255,0.45);
+    }
+    .brand-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: linear-gradient(135deg, #6C63FF, #a78bfa);
+    }
+    .app-chip {
+      font-size: 11px; font-weight: 500;
+      color: rgba(255,255,255,0.25);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      padding: 3px 10px; border-radius: 20px;
     }
 
-    .lock-icon {
-      width: 72px;
-      height: 72px;
-      margin: 0 auto 28px;
-      border-radius: 20px;
-      background: rgba(234, 88, 12, 0.1);
-      border: 1px solid rgba(234, 88, 12, 0.2);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 32px;
-      animation: float 3s ease-in-out infinite;
+    /* ── Main content ── */
+    .main {
+      flex: 1;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 32px 24px;
+      position: relative; z-index: 1;
+    }
+
+    .lock-ring {
+      width: 80px; height: 80px;
+      border-radius: 24px;
+      background: rgba(234, 88, 12, 0.08);
+      border: 1px solid rgba(234, 88, 12, 0.18);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 36px;
+      margin-bottom: 28px;
+      animation: pulse 3s ease-in-out infinite;
     }
 
     h1 {
-      font-size: 26px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-      margin-bottom: 12px;
-      background: linear-gradient(135deg, #fff, rgba(255,255,255,0.65));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
+      font-size: 28px; font-weight: 700;
+      letter-spacing: -0.6px; margin-bottom: 10px;
+      background: linear-gradient(135deg, #fff 30%, rgba(255,255,255,0.55));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
     }
 
-    .message {
-      font-size: 15px;
-      color: rgba(255, 255, 255, 0.4);
-      line-height: 1.7;
-      margin-bottom: 32px;
+    .subtitle {
+      font-size: 14px; color: rgba(255,255,255,0.38);
+      line-height: 1.7; margin-bottom: 28px;
+      max-width: 340px; text-align: center;
     }
 
-    .app-name {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 14px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      border-radius: 8px;
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.3);
+    /* ── Contact card ── */
+    .contact-card {
+      background: rgba(255,255,255,0.028);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 14px;
+      padding: 18px 24px;
       margin-bottom: 28px;
+      width: 100%; max-width: 360px;
+      text-align: center;
+    }
+    .contact-card h3 {
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 0.8px; text-transform: uppercase;
+      color: rgba(255,255,255,0.25); margin-bottom: 14px;
+    }
+    .contact-row {
+      display: flex; align-items: center; justify-content: center;
+      gap: 8px; margin-bottom: 8px;
+      font-size: 13px; color: rgba(255,255,255,0.5);
+    }
+    .contact-row:last-child { margin-bottom: 0; }
+    .contact-row a {
+      color: rgba(108,99,255,0.8); text-decoration: none;
       font-weight: 500;
     }
+    .contact-row a:hover { color: #a78bfa; }
+    .contact-icon { font-size: 14px; opacity: 0.6; }
 
-    .upgrade-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 13px 36px;
-      border-radius: 12px;
-      border: none;
-      font-size: 15px;
-      font-weight: 600;
-      color: #fff;
-      cursor: pointer;
-      background: linear-gradient(135deg, #ea580c, #f97316);
-      box-shadow: 0 4px 24px rgba(234, 88, 12, 0.3);
-      transition: all 0.3s ease;
-      text-decoration: none;
-      letter-spacing: 0.1px;
+    /* ── Ad space ── */
+    .ad-space {
+      width: 100%; max-width: 360px;
+      min-height: 90px;
+      background: rgba(255,255,255,0.018);
+      border: 1px dashed rgba(255,255,255,0.07);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 4px;
+      margin-bottom: 0;
     }
-    .upgrade-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 32px rgba(234, 88, 12, 0.45);
-    }
-    .upgrade-btn:active {
-      transform: translateY(0);
+    .ad-label {
+      font-size: 9px; font-weight: 600;
+      letter-spacing: 1px; text-transform: uppercase;
+      color: rgba(255,255,255,0.1);
     }
 
+    /* ── Footer ── */
     .footer {
-      position: fixed;
-      bottom: 24px;
-      left: 50%;
-      transform: translateX(-50%);
-      font-size: 11px;
-      color: rgba(255, 255, 255, 0.15);
-      z-index: 1;
+      position: relative; z-index: 1;
+      padding: 14px 20px;
+      border-top: 1px solid rgba(255,255,255,0.04);
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      font-size: 11px; color: rgba(255,255,255,0.15);
     }
-    .footer a {
-      color: rgba(255, 255, 255, 0.25);
-      text-decoration: none;
-    }
-    .footer a:hover {
-      color: rgba(255, 255, 255, 0.4);
-    }
+    .footer a { color: rgba(108,99,255,0.5); text-decoration: none; }
+    .footer a:hover { color: #a78bfa; }
 
-    @keyframes float {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-6px); }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(234,88,12,0); }
+      50%       { box-shadow: 0 0 0 8px rgba(234,88,12,0.06); }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="lock-icon">🔒</div>  
-    <div class="app-name">{{appTitle}}</div>
-    <h1>Trial Expired</h1>
-    <p class="message">{{lockMessage}}</p>
-    <a class="upgrade-btn" id="upgrade-link" href="#">
-      Upgrade Now →
-    </a>
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-dot"></div>
+      WebToDesk
+    </div>
+    <div class="app-chip">{{appTitle}}</div>
   </div>
+
+  <div class="main">
+    <div class="lock-ring">&#x1F512;</div>
+    <h1>Access Expired</h1>
+    <p class="subtitle">
+      Your access to <strong style="color:rgba(255,255,255,0.65)">{{appTitle}}</strong> has expired.<br>
+      Please contact your administrator for renewal or support.
+    </p>
+
+    <div class="contact-card">
+      <h3>Support &amp; Renewal</h3>
+      <div class="contact-row">
+        <span class="contact-icon">&#x1F310;</span>
+        <a href="#" id="link-web">webtodesk.com</a>
+      </div>
+      <div class="contact-row">
+        <span class="contact-icon">&#x2709;&#xFE0F;</span>
+        <a href="#" id="link-email">support@webtodesk.com</a>
+      </div>
+    </div>
+
+    <div class="ad-space" id="wtd-ad-space">
+      <span class="ad-label">Advertisement</span>
+    </div>
+  </div>
+
   <div class="footer">
-    Built with <a href="https://webtodesk.com" target="_blank">WebToDesk</a>
+    Powered by <a href="#" id="link-footer">WebToDesk</a> &mdash; Desktop App Platform
   </div>
+
   <script>
-    // Open upgrade URL via Electron IPC (if available) or fallback to shell.openExternal
-    document.getElementById('upgrade-link').addEventListener('click', function(e) {
-      e.preventDefault();
-      var upgradeUrl = '{{upgradeUrl}}';
+    function openExternal(url) {
       try {
         var { ipcRenderer } = require('electron');
-        ipcRenderer.send('open-external', upgradeUrl);
+        ipcRenderer.send('open-external', url);
       } catch (_) {
-        window.open(upgradeUrl, '_blank');
+        try { window.open(url, '_blank'); } catch (__) {}
       }
-    });
+    }
+    document.getElementById('link-web').addEventListener('click',    function(e){ e.preventDefault(); openExternal('https://webtodesk.com'); });
+    document.getElementById('link-email').addEventListener('click',  function(e){ e.preventDefault(); openExternal('mailto:support@webtodesk.com'); });
+    document.getElementById('link-footer').addEventListener('click', function(e){ e.preventDefault(); openExternal('https://webtodesk.com'); });
   </script>
 </body>
 </html>
