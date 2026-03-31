@@ -15,7 +15,8 @@ import static org.assertj.core.api.Assertions.*;
  *   1. Registry contract — tier, key, templateFile
  *   2. config.js rendering — titleBar block present / absent
  *   3. title-bar.js template content — JS structure and behaviour
- *   4. preload.js — no preload injection for this module
+ *   4. preload.js — windowAPI exposure via contextBridge
+ *   5. main.js — frameless BrowserWindow + loadFile(shell.html)
  */
 class TitleBarModuleTest {
 
@@ -109,7 +110,7 @@ class TitleBarModuleTest {
     @Test
     void titleBarJs_containsPreloadSetupExport() {
         String js = renderTitleBarModule();
-        assertThat(js).contains("function preloadSetup()");
+        assertThat(js).contains("function preloadSetup(contextBridge");
     }
 
     @Test
@@ -175,15 +176,16 @@ class TitleBarModuleTest {
         assertThat(js).contains("overlayHeight");
     }
 
-    // ─── 4. preload.js — no preloadSetup side-effects for title-bar ──────────
+    // ─── 4. preload.js — windowAPI exposure via contextBridge ────────────────
 
     @Test
-    void preloadJs_withTitleBar_emitsRequireAndEmptySetup() {
+    void preloadJs_withTitleBar_emitsRequireAndSetup() {
         String preloadReqs   = "const title_bar = require('./modules/title-bar');\n";
         String preloadSetups = "  title_bar.preloadSetup(contextBridge, ipcRenderer, config);\n";
 
         Map<String, Object> ctx = new HashMap<>();
         ctx.put("hasScreenProtect", false);
+        ctx.put("hasTitleBar",      true);
         ctx.put("preloadModuleRequires", preloadReqs);
         ctx.put("preloadModuleSetups",   preloadSetups);
 
@@ -191,6 +193,92 @@ class TitleBarModuleTest {
 
         assertThat(preloadJs).contains("require('./modules/title-bar')");
         assertThat(preloadJs).contains("title_bar.preloadSetup(");
+        assertThat(preloadJs).contains("dataset.platform");
+    }
+
+    @Test
+    void preloadJs_withoutTitleBar_noPlatformBlock() {
+        Map<String, Object> ctx = new HashMap<>();
+        ctx.put("hasScreenProtect",      false);
+        ctx.put("hasTitleBar",           false);
+        ctx.put("preloadModuleRequires", "");
+        ctx.put("preloadModuleSetups",   "");
+
+        String preloadJs = engine.render("preload.mustache", ctx);
+
+        assertThat(preloadJs).doesNotContain("dataset.platform");
+    }
+
+    // ─── 5. title-bar.js — windowAPI + buildShellHtml + IPC channels ──────────
+
+    @Test
+    void titleBarJs_exposesWindowAPI() {
+        String js = renderTitleBarModule();
+        assertThat(js).contains("windowAPI");
+        assertThat(js).contains("minimize");
+        assertThat(js).contains("toggleMaximize");
+        assertThat(js).contains("onWindowStateChanged");
+    }
+
+    @Test
+    void titleBarJs_hasBuildShellHtmlFunction() {
+        String js = renderTitleBarModule();
+        assertThat(js).contains("function buildShellHtml(");
+        assertThat(js).contains("app-bar");
+        assertThat(js).contains("side-drawer");
+        assertThat(js).contains("webview");
+        assertThat(js).contains("win-controls");
+    }
+
+    @Test
+    void titleBarJs_ipcChannelsDeclared() {
+        String js = renderTitleBarModule();
+        assertThat(js).contains("window-minimize");
+        assertThat(js).contains("window-maximize-toggle");
+        assertThat(js).contains("window-close");
+        assertThat(js).contains("window-state-changed");
+    }
+
+    @Test
+    void titleBarJs_buildShellHtmlExported() {
+        String js = renderTitleBarModule();
+        assertThat(js).contains("module.exports");
+        assertThat(js).contains("buildShellHtml");
+    }
+
+    // ─── 6. main.js — frameless window + shell.html load ─────────────────────
+
+    @Test
+    void mainJs_withTitleBar_hasFrameFalseAndLoadFile() {
+        Map<String, Object> ctx = new HashMap<>();
+        ctx.put("hasTitleBar",     true);
+        ctx.put("hasScreenProtect",false);
+        ctx.put("moduleRequires",  "const title_bar = require('./modules/title-bar');\n");
+        ctx.put("moduleSetups",    "  title_bar.setup(mainWindow, config);\n");
+
+        String mainJs = engine.render("main.mustache", ctx);
+
+        assertThat(mainJs).contains("winOpts.frame = false");
+        assertThat(mainJs).contains("webviewTag: true");
+        assertThat(mainJs).contains("loadFile");
+        assertThat(mainJs).contains("buildShellHtml");
+        assertThat(mainJs).contains("titleBarStyle");
+        assertThat(mainJs).contains("minHeight");
+    }
+
+    @Test
+    void mainJs_withoutTitleBar_hasLoadUrlNoFrameOption() {
+        Map<String, Object> ctx = new HashMap<>();
+        ctx.put("hasTitleBar",     false);
+        ctx.put("hasScreenProtect",false);
+        ctx.put("moduleRequires",  "");
+        ctx.put("moduleSetups",    "");
+
+        String mainJs = engine.render("main.mustache", ctx);
+
+        assertThat(mainJs).contains("loadURL");
+        assertThat(mainJs).doesNotContain("webviewTag");
+        assertThat(mainJs).doesNotContain("loadFile");
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────

@@ -4,6 +4,16 @@ const config = require('./config');
 contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: url => ipcRenderer.send('open-external', url)
 });
+{{#hasTitleBar}}
+// Set platform attribute before first paint so CSS selectors work immediately
+if (document.body) {
+  document.body.dataset.platform = process.platform;
+} else {
+  document.addEventListener('DOMContentLoaded', function() {
+    if (document.body) document.body.dataset.platform = process.platform;
+  });
+}
+{{/hasTitleBar}}
 
 {{#hasScreenProtect}}
 (function initializeProtectionUI() {

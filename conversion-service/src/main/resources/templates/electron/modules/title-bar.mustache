@@ -1,8 +1,12 @@
 // Module: title-bar — Tier: TRIAL
-// TRIAL:    window title = "{appTitle} — {pageTitle}" (page tab title always appended).
-// STARTER+: showTabTitle toggle, showFavicon (uses page favicon as window icon),
-//           showVersion (appends " vX.X.X"), Windows DWM overlay colour options.
+// Custom frameless app-bar rendered in a local shell.html with a <webview> for the
+// remote URL. Zero DOM injection into the target site — fully URL-independent.
+// TRIAL:    custom bar + webview, window controls, notification badge, side drawer.
+// STARTER+: showFavicon, showVersion, showTabTitle, Windows DWM overlayColor options.
 
+var ipcMain = require('electron').ipcMain;
+
+// ── IPC + main-process setup ──────────────────────────────────────────────────
 function setup(mainWindow, config) {
   if (!config.modules?.includes('title-bar')) return;
 
@@ -13,64 +17,73 @@ function setup(mainWindow, config) {
     showVersion   = false,
     overlayColor  = null,
     symbolColor   = null,
-    overlayHeight = null
+    overlayHeight = null,
+    barBg         = '#1a1a2e',
+    barText       = '#ffffff',
+    accentColor   = null
   } = config.titleBar || {};
 
+  // ── Window control IPC ──────────────────────────────────────────────────────
+  ipcMain.on('window-minimize',        function() { try { mainWindow.minimize(); }    catch (_) {} });
+  ipcMain.on('window-maximize-toggle', function() {
+    try {
+      if (mainWindow.isMaximized()) mainWindow.unmaximize();
+      else                          mainWindow.maximize();
+    } catch (_) {}
+  });
+  ipcMain.on('window-close',           function() { try { mainWindow.close(); }       catch (_) {} });
+
+  // ── Maximize / unmaximize → sync renderer icon ─────────────────────────────
+  function sendState() {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('window-state-changed', { maximized: mainWindow.isMaximized() });
+    }
+  }
+  mainWindow.on('maximize',   sendState);
+  mainWindow.on('unmaximize', sendState);
+  mainWindow.webContents.on('did-stop-loading', sendState);
+
+  // ── Webview page-title sync: keep window title in sync via did-finish-load ──
   const baseTitle = (typeof text === 'string' && text.trim().length > 0)
     ? text.trim()
     : (config.appTitle || config.projectName || 'App');
-
   const versionSuffix = (showVersion && config.currentVersion)
-    ? ' v' + config.currentVersion
-    : '';
-
-  function buildTitle(pageTitle) {
-    var base = baseTitle + versionSuffix;
-    if (showTabTitle && typeof pageTitle === 'string' && pageTitle.trim().length > 0) {
-      return base + ' \u2014 ' + pageTitle.trim();
-    }
-    return base;
-  }
+    ? ' v' + config.currentVersion : '';
 
   function applyTitle(pageTitle) {
-    try { mainWindow.setTitle(buildTitle(pageTitle || '')); } catch (_) {}
+    var base = baseTitle + versionSuffix;
+    var full = (showTabTitle && pageTitle && pageTitle.trim())
+      ? base + ' \u2014 ' + pageTitle.trim() : base;
+    try { mainWindow.setTitle(full); } catch (_) {}
   }
 
-  // Set initial title immediately
   applyTitle('');
 
-  // After each page load, read the actual page title and apply
   mainWindow.webContents.on('did-finish-load', function() {
     mainWindow.webContents.executeJavaScript('document.title')
-      .then(function(t) { applyTitle(t || ''); })
-      .catch(function()  { applyTitle(''); });
+      .then(function(t) { applyTitle(t || ''); }).catch(function() { applyTitle(''); });
   });
 
-  // Intercept renderer-side title changes
   mainWindow.webContents.on('page-title-updated', function(event, pageTitle) {
     event.preventDefault();
     applyTitle(showTabTitle ? (pageTitle || '') : '');
   });
 
-  // ── Favicon → window icon (STARTER+ only) ─────────────────────────────────
+  // ── Favicon → window icon (STARTER+) ───────────────────────────────────────
   if (showFavicon) {
     var nativeImage = require('electron').nativeImage;
     mainWindow.webContents.on('page-favicon-updated', function(event, favicons) {
-      if (!favicons || favicons.length === 0) return;
-      var url = favicons[0];
-      mainWindow.webContents.session.fetch(url)
+      if (!favicons || !favicons.length) return;
+      mainWindow.webContents.session.fetch(favicons[0])
         .then(function(res) { return res.arrayBuffer(); })
         .then(function(buf) {
           var img = nativeImage.createFromBuffer(Buffer.from(buf));
-          if (!img.isEmpty()) {
-            try { mainWindow.setIcon(img); } catch (_) {}
-          }
-        })
-        .catch(function() {});
+          if (!img.isEmpty()) { try { mainWindow.setIcon(img); } catch (_) {} }
+        }).catch(function() {});
     });
   }
 
-  // ── Windows DWM title-bar colour overlay ──────────────────────────────────
+  // ── Windows DWM title-bar colour overlay ───────────────────────────────────
   if (process.platform === 'win32') {
     var overlay = {};
     if (overlayColor  != null) overlay.color       = overlayColor;
@@ -80,17 +93,209 @@ function setup(mainWindow, config) {
       try { mainWindow.setTitleBarOverlay(overlay); } catch (_) {}
     }
   }
+
+  // ── Pass theme vars to shell after load ────────────────────────────────────
+  mainWindow.webContents.on('did-finish-load', function() {
+    var bg  = accentColor || barBg;
+    mainWindow.webContents.executeJavaScript(
+      'document.documentElement.style.setProperty(\'--bar-bg\', \'' + bg + '\');' +
+      'document.documentElement.style.setProperty(\'--bar-text\', \'' + barText + '\');'
+    ).catch(function() {});
+  });
 }
 
-function preloadSetup() {}
+// ── preload: expose windowAPI + set platform data-attribute ──────────────────
+function preloadSetup(contextBridge, ipcRenderer, config) {
+  contextBridge.exposeInMainWorld('windowAPI', {
+    minimize:           function() { ipcRenderer.send('window-minimize'); },
+    toggleMaximize:     function() { ipcRenderer.send('window-maximize-toggle'); },
+    close:              function() { ipcRenderer.send('window-close'); },
+    onWindowStateChanged: function(cb) {
+      ipcRenderer.on('window-state-changed', function(event, data) { cb(data); });
+    }
+  });
+  document.body.dataset.platform = process.platform;
+}
 
+// ── Shell HTML builder — called from main.js before loadFile() ────────────────
+function buildShellHtml(siteUrl, appTitle, config) {
+  var cfg    = (config && config.titleBar) || {};
+  var barBg  = cfg.accentColor || cfg.barBg  || '#1a1a2e';
+  var barTxt = cfg.barText || '#ffffff';
+
+  var CSS = [
+    ':root{--bar-bg:' + barBg + ';--bar-text:' + barTxt + ';',
+    '--btn-hover:rgba(255,255,255,0.10);--close-hover:#e81123;',
+    '--drawer-bg:#16213e;--drawer-w:260px;--bar-h:38px;}',
+    '*{margin:0;padding:0;box-sizing:border-box;}',
+    'html,body{width:100%;height:100%;overflow:hidden;background:var(--bar-bg);}',
+    '#app-bar{position:fixed;top:0;left:0;right:0;height:var(--bar-h);',
+    'background:var(--bar-bg);color:var(--bar-text);display:flex;align-items:center;',
+    'z-index:9999;box-shadow:0 1px 0 rgba(0,0,0,0.18);-webkit-app-region:drag;',
+    'user-select:none;-webkit-user-select:none;}',
+    '#bar-left{display:flex;align-items:center;gap:8px;padding:0 12px;flex-shrink:0;-webkit-app-region:drag;}',
+    '[data-platform=darwin] #bar-left{padding-left:76px;}',
+    '#app-icon{width:18px;height:18px;object-fit:contain;pointer-events:none;}',
+    '#app-title{font-size:13px;font-weight:500;white-space:nowrap;opacity:.9;}',
+    '#bar-center{flex:1;-webkit-app-region:drag;min-width:0;}',
+    '#bar-right{display:flex;align-items:center;-webkit-app-region:no-drag;flex-shrink:0;}',
+    '.ibg{display:flex;align-items:center;gap:2px;padding:0 6px;}',
+    '.ibtn{position:relative;display:flex;align-items:center;justify-content:center;',
+    'width:32px;height:32px;border-radius:6px;background:transparent;border:none;',
+    'cursor:pointer;color:var(--bar-text);opacity:.75;-webkit-app-region:no-drag;',
+    'transition:background .15s,opacity .15s;}',
+    '.ibtn:hover{background:var(--btn-hover);opacity:1;}',
+    '.ibtn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;',
+    'stroke-linecap:round;stroke-linejoin:round;pointer-events:none;}',
+    '.badge{position:absolute;top:2px;right:2px;background:#e53e3e;color:#fff;',
+    'border-radius:9999px;font-size:9px;font-weight:700;padding:0 3px;min-width:14px;',
+    'height:14px;display:none;align-items:center;justify-content:center;}',
+    '.badge.on{display:flex;}',
+    '#win-controls{display:flex;align-items:center;height:var(--bar-h);}',
+    '[data-platform=darwin] #win-controls{display:none;}',
+    '.wbtn{display:flex;align-items:center;justify-content:center;width:46px;height:100%;',
+    'background:transparent;border:none;cursor:pointer;color:var(--bar-text);',
+    'opacity:.85;-webkit-app-region:no-drag;transition:background .1s;}',
+    '.wbtn:hover{background:var(--btn-hover);opacity:1;}',
+    '.wbtn svg{width:12px;height:12px;stroke:currentColor;stroke-width:1.6;fill:none;pointer-events:none;}',
+    '#btn-close:hover{background:var(--close-hover)!important;opacity:1!important;}',
+    '#side-drawer{position:fixed;top:var(--bar-h);right:0;bottom:0;width:var(--drawer-w);',
+    'background:var(--drawer-bg);color:var(--bar-text);transform:translateX(100%);',
+    'transition:transform .25s ease;z-index:9998;box-shadow:-2px 0 16px rgba(0,0,0,.3);',
+    'display:flex;flex-direction:column;}',
+    '#side-drawer.open{transform:translateX(0);}',
+    '#drw-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9997;',
+    'display:none;opacity:0;transition:opacity .25s;}',
+    '#drw-overlay.on{display:block;opacity:1;}',
+    '#drw-hdr{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08);',
+    'display:flex;align-items:center;justify-content:space-between;}',
+    '#drw-hdr span{font-size:13px;font-weight:600;opacity:.9;}',
+    '#drw-close{background:none;border:none;cursor:pointer;color:var(--bar-text);',
+    'opacity:.6;padding:4px;border-radius:4px;display:flex;transition:opacity .15s;}',
+    '#drw-close:hover{opacity:1;}',
+    '#drw-close svg{width:15px;height:15px;stroke:currentColor;stroke-width:2;fill:none;}',
+    '#drw-content{flex:1;overflow-y:auto;padding:8px;}',
+    '.drw-item{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;',
+    'cursor:pointer;transition:background .15s;font-size:13px;font-weight:500;',
+    'color:var(--bar-text);opacity:.8;}',
+    '.drw-item:hover{background:rgba(255,255,255,.08);opacity:1;}',
+    '.drw-item svg{width:16px;height:16px;stroke:currentColor;fill:none;',
+    'stroke-width:1.8;flex-shrink:0;}',
+    'webview{position:fixed;top:var(--bar-h);left:0;right:0;bottom:0;',
+    'width:100%;height:calc(100vh - var(--bar-h));border:none;}'
+  ].join('');
+
+  var SVG_BELL     = '<svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
+  var SVG_GEAR     = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+  var SVG_MENU     = '<svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
+  var SVG_MINUS    = '<svg viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6"/></svg>';
+  var SVG_MAXIMIZE = '<svg viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9" rx="0.5"/></svg>';
+  var SVG_RESTORE  = '<svg viewBox="0 0 12 12"><rect x="3" y="4" width="7.5" height="7.5" rx="0.5"/><path d="M2.5 8V2.5H8"/></svg>';
+  var SVG_CLOSE    = '<svg viewBox="0 0 12 12"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg>';
+
+  var JS = [
+    '(function(){',
+    'var api=window.windowAPI;',
+    'var plat=navigator.platform;',
+    'var isMac=plat.indexOf("Mac")!==-1;',
+    'document.body.dataset.platform=isMac?"darwin":(plat.indexOf("Win")!==-1?"win32":"linux");',
+    'var MAX_SVG="' + SVG_MAXIMIZE.replace(/"/g, '\\"') + '";',
+    'var RES_SVG="' + SVG_RESTORE.replace(/"/g, '\\"') + '";',
+    'var bMin=document.getElementById("btn-minimize");',
+    'var bMax=document.getElementById("btn-maximize");',
+    'var bCls=document.getElementById("btn-close");',
+    'var bDrw=document.getElementById("btn-drawer");',
+    'var drw=document.getElementById("side-drawer");',
+    'var ovr=document.getElementById("drw-overlay");',
+    'var drwClose=document.getElementById("drw-close");',
+    'var badge=document.getElementById("notif-badge");',
+    'var wv=document.getElementById("main-webview");',
+    'if(api){',
+    '  bMin&&bMin.addEventListener("click",function(){api.minimize();});',
+    '  bMax&&bMax.addEventListener("click",function(){api.toggleMaximize();});',
+    '  bCls&&bCls.addEventListener("click",function(){api.close();});',
+    '  api.onWindowStateChanged(function(d){',
+    '    if(bMax)bMax.innerHTML=d.maximized?RES_SVG:MAX_SVG;',
+    '  });',
+    '}',
+    'function openDrw(){drw.classList.add("open");ovr.classList.add("on");}',
+    'function closeDrw(){drw.classList.remove("open");ovr.classList.remove("on");}',
+    'bDrw&&bDrw.addEventListener("click",openDrw);',
+    'ovr&&ovr.addEventListener("click",closeDrw);',
+    'drwClose&&drwClose.addEventListener("click",closeDrw);',
+    'if(wv){',
+    '  wv.addEventListener("page-title-updated",function(e){AppBar.setTitle(e.title);});',
+    '  wv.addEventListener("page-favicon-updated",function(e){',
+    '    if(e.favicons&&e.favicons.length)AppBar.setIcon(e.favicons[0]);',
+    '  });',
+    '}',
+    'window.AppBar={',
+    '  setBadgeCount:function(n){badge.textContent=n;badge.classList.toggle("on",n>0);},',
+    '  setTitle:function(t){var el=document.getElementById("app-title");if(el)el.textContent=t;},',
+    '  setIcon:function(s){var el=document.getElementById("app-icon");if(el&&s)el.src=s;},',
+    '  addDrawerItem:function(item){',
+    '    var c=document.getElementById("drw-content");if(!c)return;',
+    '    var d=document.createElement("div");d.className="drw-item";',
+    '    d.innerHTML=(item.icon||"")+"<span>"+(item.label||"")+"</span>";',
+    '    if(item.onClick)d.addEventListener("click",item.onClick);',
+    '    c.appendChild(d);',
+    '  }',
+    '};',
+    '})();'
+  ].join('\n');
+
+  return [
+    '<!DOCTYPE html><html><head><meta charset="UTF-8">',
+    '<meta http-equiv="Content-Security-Policy" content="default-src * blob: data: \'unsafe-inline\' \'unsafe-eval\';">',
+    '<style>' + CSS + '</style></head><body>',
+    '<div id="app-bar">',
+    '  <div id="bar-left">',
+    '    <img id="app-icon" src="" alt="">',
+    '    <span id="app-title">' + appTitle + '</span>',
+    '  </div>',
+    '  <div id="bar-center"></div>',
+    '  <div id="bar-right">',
+    '    <div class="ibg">',
+    '      <button id="btn-notifications" class="ibtn" title="Notifications">',
+    '        ' + SVG_BELL,
+    '        <span class="badge" id="notif-badge"></span>',
+    '      </button>',
+    '      <button id="btn-settings" class="ibtn" title="Settings">' + SVG_GEAR + '</button>',
+    '      <button id="btn-drawer" class="ibtn" title="Menu">' + SVG_MENU + '</button>',
+    '    </div>',
+    '    <div id="win-controls">',
+    '      <button id="btn-minimize" class="wbtn" title="Minimize">' + SVG_MINUS + '</button>',
+    '      <button id="btn-maximize" class="wbtn" title="Maximize/Restore">' + SVG_MAXIMIZE + '</button>',
+    '      <button id="btn-close" class="wbtn" title="Close">' + SVG_CLOSE + '</button>',
+    '    </div>',
+    '  </div>',
+    '</div>',
+    '<div id="side-drawer">',
+    '  <div id="drw-hdr">',
+    '    <span>Menu</span>',
+    '    <button id="drw-close">' + SVG_CLOSE + '</button>',
+    '  </div>',
+    '  <div id="drw-content"></div>',
+    '</div>',
+    '<div id="drw-overlay"></div>',
+    '<webview id="main-webview" src="' + siteUrl + '" allowpopups></webview>',
+    '<script>' + JS + '</script>',
+    '</body></html>'
+  ].join('\n');
+}
+
+// ── Teardown ──────────────────────────────────────────────────────────────────
 function teardown(mainWindow) {
   if (!mainWindow) return;
   try {
+    ipcMain.removeAllListeners('window-minimize');
+    ipcMain.removeAllListeners('window-maximize-toggle');
+    ipcMain.removeAllListeners('window-close');
     mainWindow.webContents.removeAllListeners('did-finish-load');
     mainWindow.webContents.removeAllListeners('page-title-updated');
     mainWindow.webContents.removeAllListeners('page-favicon-updated');
+    mainWindow.webContents.removeAllListeners('did-stop-loading');
   } catch (_) {}
 }
 
-module.exports = { setup, preloadSetup, teardown };
+module.exports = { setup, preloadSetup, teardown, buildShellHtml };

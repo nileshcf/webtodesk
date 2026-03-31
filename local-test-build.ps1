@@ -3,9 +3,9 @@
   Builds and launches a local Electron test app — no microservices needed.
   Copies module templates directly, renders config/entry files, then runs Electron.
 
-  Modules: ALL TRIAL (splash-screen, offline, badge, domain-lock, title-bar, watermark, expiry)
+  Modules: splash-screen, watermark, navigation, title-bar
   URL    : https://www.youtube.com
-  Expiry : 4 pm today (local time) — change system clock past 4 pm to test lock screen.
+  Expiry : none (test run)
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -29,7 +29,7 @@ Write-Host "  Dir       : $TestDir"         -ForegroundColor White
 Write-Host "  App       : $AppTitle"         -ForegroundColor White
 Write-Host "  URL       : $WebsiteUrl"       -ForegroundColor White
 Write-Host "  Expiry    : $expiry4pm (local time)" -ForegroundColor Yellow
-Write-Host "  Modules   : splash-screen, offline, badge, domain-lock, title-bar, watermark, expiry" -ForegroundColor White
+Write-Host "  Modules   : splash-screen, watermark, navigation, title-bar" -ForegroundColor White
 Write-Host ""
 
 # -- 1. Create / clean test directory ---------------------------------------------------
@@ -41,7 +41,7 @@ New-Item -ItemType Directory -Force -Path "$TestDir\modules" | Out-Null
 
 # -- 2. Copy module templates as .js files
 Write-Host "[..] Copying TRIAL module templates..." -ForegroundColor Cyan
-$trialModules = @('splash-screen','watermark','navigation')
+$trialModules = @('splash-screen','watermark','navigation','title-bar')
 foreach ($mod in $trialModules) {
     $src = "$TemplatesDir\modules\$mod.mustache"
     if (Test-Path $src) {
@@ -55,14 +55,22 @@ foreach ($mod in $trialModules) {
 # ── 3. config.js ─────────────────────────────────────────────────────────────
 Write-Host "[..] Writing config.js..." -ForegroundColor Cyan
 @"
-// Local test build — WebToDesk PRO module test (splash-screen + watermark + navigation)
+// Local test build — WebToDesk module test (splash + watermark + navigation + title-bar)
 module.exports = {
   projectName:    'youtube-desktop-test',
   currentVersion: '$Version',
   appTitle:       '$AppTitle',
   websiteUrl:     '$WebsiteUrl',
   iconFile:       'icon.ico',
-  modules: ["splash-screen","watermark","navigation"],
+  modules: ["splash-screen","watermark","navigation","title-bar"],
+
+  titleBar: {
+    barBg:        '#0f0f1a',
+    barText:      '#e2e8f0',
+    accentColor:  '#6C63FF',
+    showTabTitle: true,
+    showVersion:  true
+  },
 
   splashScreen: {
     "duration":     10000,
@@ -103,34 +111,45 @@ Write-Host "[..] Writing main.js..." -ForegroundColor Cyan
 @'
 const { app, BrowserWindow, globalShortcut, ipcMain, shell } = require('electron');
 const path   = require('path');
+const fs     = require('fs');
 const config = require('./config');
-const { appTitle, websiteUrl } = config;
+const { appTitle, websiteUrl, iconFile } = config;
 
 const splash_screen = require('./modules/splash-screen');
 const watermark     = require('./modules/watermark');
 const navigation    = require('./modules/navigation');
+const title_bar     = require('./modules/title-bar');
 
 async function createWindow() {
-  const mainWindow = new BrowserWindow({
-    width: 1280, height: 800,
+  const winOpts = {
+    width: 1280, height: 800, minHeight: 80,
     title: appTitle,
     show: false,
     webPreferences: {
       nodeIntegration:  false,
       contextIsolation: true,
+      webviewTag:       true,
       preload: path.join(__dirname, 'preload.js')
     }
-  });
+  };
+  if (process.platform === 'darwin') winOpts.titleBarStyle = 'hidden';
+  else winOpts.frame = false;
+
+  const mainWindow = new BrowserWindow(winOpts);
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
-  mainWindow.loadURL(websiteUrl).catch(err => console.error('[wtd] load error:', err.message));
-  mainWindow.webContents.on('page-title-updated', e => { e.preventDefault(); mainWindow.setTitle(appTitle); });
+
+  const shellPath = path.join(__dirname, 'shell.html');
+  fs.writeFileSync(shellPath, title_bar.buildShellHtml(websiteUrl, appTitle, config), 'utf8');
+  mainWindow.loadFile(shellPath).catch(err => console.error('[wtd] shell load error:', err.message));
+
   mainWindow.setMenuBarVisibility(false);
 
   // ── Module setups ─────────────────────────────────────────────────────────
   splash_screen.setup(mainWindow, config);
   watermark.setup(mainWindow, config);
   navigation.setup(mainWindow, config);
+  title_bar.setup(mainWindow, config);
 }
 
 app.whenReady().then(createWindow);
@@ -149,11 +168,19 @@ const config = require('./config');
 const splash_screen = require('./modules/splash-screen');
 const watermark     = require('./modules/watermark');
 const navigation    = require('./modules/navigation');
+const title_bar     = require('./modules/title-bar');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: url => ipcRenderer.send('open-external', url)
 });
 
+// Set platform attribute for shell.html CSS before first paint
+if (document.body) document.body.dataset.platform = process.platform;
+else document.addEventListener('DOMContentLoaded', function() {
+  if (document.body) document.body.dataset.platform = process.platform;
+});
+
+title_bar.preloadSetup(contextBridge, ipcRenderer, config);
 splash_screen.preloadSetup(contextBridge, ipcRenderer, config);
 watermark.preloadSetup(contextBridge, ipcRenderer, config);
 navigation.preloadSetup(contextBridge, ipcRenderer, config);
@@ -204,10 +231,12 @@ try {
     Write-Host "  [LAUNCH] Starting YouTube Desktop..." -ForegroundColor Green
     Write-Host ""
     Write-Host "  What to expect:" -ForegroundColor White
-    Write-Host "    * Splash screen (10 s, purple brand accent)" -ForegroundColor DarkCyan
-    Write-Host "    * YouTube loads - PRO badge top-right (indigo)" -ForegroundColor DarkCyan
-    Write-Host "    * Tiled canvas watermark fades in (PRO overlay, appName + time)" -ForegroundColor DarkCyan
-    Write-Host "    * 4-min BrowserWindow TRIAL overlay also active - click anywhere to dismiss" -ForegroundColor DarkCyan
+    Write-Host "    * Splash screen (10 s, purple accent)" -ForegroundColor DarkCyan
+    Write-Host "    * Frameless window — custom app bar at top (38px, dark theme)" -ForegroundColor DarkCyan
+    Write-Host "    * YouTube loads inside the <webview> below the bar" -ForegroundColor DarkCyan
+    Write-Host "    * Bell / gear / menu buttons top-right; Win controls (–  □  ×)" -ForegroundColor DarkCyan
+    Write-Host "    * Hamburger opens slide-in drawer from right" -ForegroundColor DarkCyan
+    Write-Host "    * PRO badge + tiled canvas watermark + DRM ghost IP watermark" -ForegroundColor DarkCyan
     Write-Host "    * Hover left/right edges for back/forward nav arrows" -ForegroundColor DarkCyan
     Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
     Write-Host ""

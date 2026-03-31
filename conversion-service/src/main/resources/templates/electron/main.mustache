@@ -1,5 +1,6 @@
 const { app, BrowserWindow, globalShortcut, ipcMain, shell } = require('electron');
 const path = require('path');
+const fs   = require('fs');
 const config = require('./config');
 const { appTitle, websiteUrl, iconFile } = config;
 {{{moduleRequires}}}
@@ -9,21 +10,42 @@ async function createWindow() {
       process.platform === 'darwin' ? 'icon.icns' :
       process.platform === 'win32'  ? iconFile : 'icon.png');
 
-  const mainWindow = new BrowserWindow({
+  const winOpts = {
     width: 1200,
     height: 800,
+    minHeight: 80,
     title: appTitle,
     icon: getIconPath(),
     show: false,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+{{#hasTitleBar}}
+      webviewTag: true,
+{{/hasTitleBar}}
     }
-  });
+  };
+{{#hasTitleBar}}
+  if (process.platform === 'darwin') {
+    winOpts.titleBarStyle = 'hidden';
+  } else {
+    winOpts.frame = false;
+  }
+{{/hasTitleBar}}
+
+  const mainWindow = new BrowserWindow(winOpts);
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
 
+{{#hasTitleBar}}
+  const shellPath = path.join(__dirname, 'shell.html');
+  fs.writeFileSync(shellPath, title_bar.buildShellHtml(websiteUrl, appTitle, config), 'utf8');
+  mainWindow.loadFile(shellPath).catch(err => {
+    console.error('[wtd] shell load error:', err.message);
+  });
+{{/hasTitleBar}}
+{{^hasTitleBar}}
   mainWindow.loadURL(websiteUrl).catch(err => {
     console.error('Failed to load URL:', err.message);
   });
@@ -32,6 +54,7 @@ async function createWindow() {
     event.preventDefault();
     mainWindow.setTitle(appTitle);
   });
+{{/hasTitleBar}}
 
   mainWindow.setMenuBarVisibility(false);
 
